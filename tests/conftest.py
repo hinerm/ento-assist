@@ -16,9 +16,15 @@ from ento_assist.db.connection import get_connection, initialize_db
 # ---------------------------------------------------------------------------
 # Fixture PDF constants (fill in after first confirmed run with sample_key.pdf)
 # ---------------------------------------------------------------------------
-FIXTURE_PDF_PAGE_COUNT: int | None = None  # total pages in sample_key.pdf
-FIXTURE_PDF_KEY_PAGE: int | None = None  # 1-indexed page containing the key
-FIXTURE_PDF_TERMINAL_TAXA: list[str] = []  # e.g. ["Aedes aegypti", "Culex pipiens"]
+FIXTURE_PDF_PAGE_COUNT: int | None = 1  # total pages in sample_key.pdf
+FIXTURE_PDF_KEY_PAGE: int | None = 1  # 1-indexed page containing the key
+FIXTURE_PDF_TERMINAL_TAXA: list[str] = [
+    "Protichneumon effigies",
+    "Protichneumon grandis grandis",
+    "Protichneumon grandis regnatrix",
+    "Protichneumon grandis victoriae",
+    "Protichneumon polytropos",
+]
 FIXTURE_PDF_IMAGE_ONLY_PAGE: int | None = None  # 1-indexed image-only page, or None
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
