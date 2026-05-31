@@ -140,7 +140,7 @@ def _merge_table(conn: sqlite3.Connection, table: str, prefer: str) -> list[str]
             if existing and conflict_cols:
                 for col in conflict_cols:
                     src_val = row_dict.get(col)
-                    dst_val = existing.get(col)
+                    dst_val = existing[col]
                     if src_val != dst_val and src_val is not None and dst_val is not None:
                         warnings.append(
                             f"CONFLICT [{table}.{col}] id={row_id}: "
