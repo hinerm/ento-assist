@@ -5,6 +5,8 @@ system. The agent connects to the `ento-assist` MCP server, which exposes tools
 for building a dichotomous key database from PDF texts and for guiding users
 through identification sessions.
 
+See [README.md](../README.md) for full user and developer documentation.
+
 ## Architecture Overview
 
 ```
@@ -47,22 +49,6 @@ The agent MUST:
 
 These rules are enforced via the MCP `initialize` response `instructions` field.
 They MUST NOT be weakened in any edits to `server.py`.
-
-## Running the Server
-
-```bash
-export ENTO_DB_PATH=/path/to/your/ento.sqlite
-uv run ento-assist
-```
-
-Or via the `.vscode/mcp.json` MCP server configuration (set `ENTO_DB_PATH` in
-your shell environment before launching VS Code).
-
-## Merging Databases
-
-```bash
-ento-merge db1.sqlite db2.sqlite --output merged.sqlite [--prefer db1|db2]
-```
 
 ## Development Notes
 
