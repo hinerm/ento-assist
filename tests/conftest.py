@@ -159,11 +159,11 @@ def session_file(tmp_path: Path, minimal_couplet_graph: tuple[Path, str]) -> tup
         ).fetchone()
     assert row is not None
 
-    # Call start_session directly (bypasses MCP transport)
+    # Call run_start_session directly (bypasses MCP transport)
     mcp = FastMCP("test")
     register_identification_tools(mcp)
     # Access the underlying function via the tool registry
-    start_fn = _get_tool_fn(mcp, "start_session")
+    start_fn = _get_tool_fn(mcp, "run_start_session")
     start_fn(db_path=str(db_path), key_id=key_id, output_path=str(session_path))
 
     return session_path, db_path, key_id

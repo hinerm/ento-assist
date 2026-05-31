@@ -59,7 +59,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             "taxon name. Returns key_id, title, scope, and source document for each key."
         )
     )
-    def list_keys(db_path: str, taxon_name: str = "") -> dict[str, Any]:
+    def run_list_keys(db_path: str, taxon_name: str = "") -> dict[str, Any]:
         """List available identification keys.
 
         Args:
@@ -113,7 +113,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             "The session file is personal and should NOT be committed to shared databases."
         )
     )
-    def start_session(
+    def run_start_session(
         db_path: str,
         key_id: str,
         output_path: str,
@@ -179,7 +179,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             "Reads the current state from frontmatter and returns the current couplet data."
         )
     )
-    def resume_session(session_path: str) -> dict[str, Any]:
+    def run_resume_session(session_path: str) -> dict[str, Any]:
         """Resume an identification session.
 
         Args:
@@ -197,7 +197,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
                 "terminal_taxon_id": terminal_id,
                 "message": (
                     "This session is already complete. "
-                    "Use get_taxon_description to review the result."
+                    "Use run_taxon_description to review the result."
                 ),
             }
 
@@ -215,7 +215,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             "not for the LLM to analyze."
         )
     )
-    def get_current_couplet(session_path: str) -> dict[str, Any]:
+    def run_get_couplet(session_path: str) -> dict[str, Any]:
         """Get the current couplet in a session.
 
         Args:
@@ -233,7 +233,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             "IMPORTANT: Always use this tool to advance — never infer the next couplet from text."
         )
     )
-    def advance_session(session_path: str, leg_label: str) -> dict[str, Any]:
+    def run_advance_session(session_path: str, leg_label: str) -> dict[str, Any]:
         """Choose a couplet leg and advance to the next step.
 
         Args:
@@ -301,7 +301,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
                 "terminal_taxon_id": taxon_id,
                 "message": (
                     "Reached terminal taxon. "
-                    "Call get_taxon_description to retrieve and present the full description."
+                    "Call run_taxon_description to retrieve and present the full description."
                 ),
             }
 
@@ -343,7 +343,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             "reachable via each branch. Useful when the user is uncertain which leg to choose."
         )
     )
-    def look_ahead(session_path: str, depth: int = 3) -> dict[str, Any]:
+    def run_look_ahead(session_path: str, depth: int = 3) -> dict[str, Any]:
         """Traverse both branches to show reachable terminal taxa.
 
         Args:
@@ -373,7 +373,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             "Reads from the markdown body — no database query required."
         )
     )
-    def get_session_history(session_path: str) -> dict[str, Any]:
+    def run_session_history(session_path: str) -> dict[str, Any]:
         """Get the breadcrumb history from a session file.
 
         Args:
@@ -400,7 +400,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             "may not know. Falls back to FTS5 search if exact match not found."
         )
     )
-    def lookup_term(db_path: str, term: str) -> dict[str, Any]:
+    def run_lookup_term(db_path: str, term: str) -> dict[str, Any]:
         """Look up a glossary term.
 
         Args:
@@ -443,7 +443,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             "The image is for the user to view — do NOT attempt to analyze it."
         )
     )
-    def get_figure(db_path: str, fig_id: str) -> Image:
+    def run_get_figure(db_path: str, fig_id: str) -> Image:
         """Retrieve a figure image.
 
         Args:
@@ -467,7 +467,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             "for verification before concluding the identification."
         )
     )
-    def get_taxon_description(db_path: str, taxon_id: str) -> dict[str, Any]:
+    def run_taxon_description(db_path: str, taxon_id: str) -> dict[str, Any]:
         """Get the full description of a taxon.
 
         Args:
@@ -497,7 +497,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             "Useful for finding a taxon by a partial name or characteristic."
         )
     )
-    def search_taxa(db_path: str, query: str) -> dict[str, Any]:
+    def run_search_taxa(db_path: str, query: str) -> dict[str, Any]:
         """Search taxa and descriptions using FTS5.
 
         Args:

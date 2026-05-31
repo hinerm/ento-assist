@@ -57,7 +57,7 @@ def test_start_session_creates_file(
     db_path, key_id = minimal_couplet_graph
     session_path = tmp_path / "session.md"
 
-    result = id_tools["start_session"](
+    result = id_tools["run_start_session"](
         db_path=str(db_path), key_id=key_id, output_path=str(session_path)
     )
 
@@ -71,7 +71,9 @@ def test_start_session_frontmatter_fields(
 ):
     db_path, key_id = minimal_couplet_graph
     session_path = tmp_path / "session.md"
-    id_tools["start_session"](db_path=str(db_path), key_id=key_id, output_path=str(session_path))
+    id_tools["run_start_session"](
+        db_path=str(db_path), key_id=key_id, output_path=str(session_path)
+    )
 
     post = frontmatter.load(str(session_path))
     assert post.metadata["key_id"] == key_id
@@ -85,7 +87,7 @@ def test_start_session_invalid_key_raises(
 ):
     db_path, _ = minimal_couplet_graph
     with pytest.raises(ValueError):
-        id_tools["start_session"](
+        id_tools["run_start_session"](
             db_path=str(db_path),
             key_id=str(uuid.uuid4()),  # nonexistent key
             output_path=str(tmp_path / "bad.md"),
@@ -99,14 +101,14 @@ def test_start_session_invalid_key_raises(
 
 def test_resume_session_reads_current_position(id_tools, session_file: tuple[Path, Path, str]):
     session_path, db_path, key_id = session_file
-    result = id_tools["resume_session"](session_path=str(session_path))
+    result = id_tools["run_resume_session"](session_path=str(session_path))
     assert result["status"] == "in_progress"
     assert "couplet_id" in result or "couplet_number" in result or "leg_A" in result
 
 
 def test_resume_session_missing_file_raises(id_tools, tmp_path: Path):
     with pytest.raises(FileNotFoundError):
-        id_tools["resume_session"](session_path=str(tmp_path / "noexist.md"))
+        id_tools["run_resume_session"](session_path=str(tmp_path / "noexist.md"))
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +118,7 @@ def test_resume_session_missing_file_raises(id_tools, tmp_path: Path):
 
 def test_advance_session_a_moves_to_next_couplet(id_tools, session_file: tuple[Path, Path, str]):
     session_path, db_path, _ = session_file
-    result = id_tools["advance_session"](session_path=str(session_path), leg_label="A")
+    result = id_tools["run_advance_session"](session_path=str(session_path), leg_label="A")
     assert result["status"] in ("in_progress", "complete")
 
 
@@ -129,11 +131,11 @@ def test_advance_session_b_branch_different_from_a(
     path_a = tmp_path / "session_a.md"
     path_b = tmp_path / "session_b.md"
 
-    id_tools["start_session"](db_path=str(db_path), key_id=key_id, output_path=str(path_a))
-    id_tools["start_session"](db_path=str(db_path), key_id=key_id, output_path=str(path_b))
+    id_tools["run_start_session"](db_path=str(db_path), key_id=key_id, output_path=str(path_a))
+    id_tools["run_start_session"](db_path=str(db_path), key_id=key_id, output_path=str(path_b))
 
-    res_a = id_tools["advance_session"](session_path=str(path_a), leg_label="A")
-    res_b = id_tools["advance_session"](session_path=str(path_b), leg_label="B")
+    res_a = id_tools["run_advance_session"](session_path=str(path_a), leg_label="A")
+    res_b = id_tools["run_advance_session"](session_path=str(path_b), leg_label="B")
 
     # Choosing A and B from the same couplet must lead to different next positions
     couplet_id_a = res_a.get("couplet_id")
@@ -145,7 +147,7 @@ def test_advance_session_b_branch_different_from_a(
 def test_advance_session_invalid_choice_raises(id_tools, session_file: tuple[Path, Path, str]):
     session_path, _, _ = session_file
     with pytest.raises(ValueError):
-        id_tools["advance_session"](session_path=str(session_path), leg_label="C")
+        id_tools["run_advance_session"](session_path=str(session_path), leg_label="C")
 
 
 def test_advance_session_updates_session_file(id_tools, session_file: tuple[Path, Path, str]):
@@ -153,7 +155,7 @@ def test_advance_session_updates_session_file(id_tools, session_file: tuple[Path
     before = frontmatter.load(str(session_path))
     before_couplet = before.metadata["current_couplet_id"]
 
-    id_tools["advance_session"](session_path=str(session_path), leg_label="A")
+    id_tools["run_advance_session"](session_path=str(session_path), leg_label="A")
 
     after = frontmatter.load(str(session_path))
     # Either the couplet changed (moved forward) or status is complete (terminal reached)
@@ -174,11 +176,13 @@ def test_full_traversal_reaches_terminal(
     """Follow path A→A→A from the root to reach Anopheles gambiae."""
     db_path, key_id = minimal_couplet_graph
     session_path = tmp_path / "full.md"
-    id_tools["start_session"](db_path=str(db_path), key_id=key_id, output_path=str(session_path))
+    id_tools["run_start_session"](
+        db_path=str(db_path), key_id=key_id, output_path=str(session_path)
+    )
 
     # A→A→A reaches couplet 4 leg A → Anopheles gambiae
     for _ in range(3):
-        result = id_tools["advance_session"](session_path=str(session_path), leg_label="A")
+        result = id_tools["run_advance_session"](session_path=str(session_path), leg_label="A")
         if result["status"] == "complete":
             break
 
@@ -192,17 +196,19 @@ def test_terminal_taxon_retrievable(
 ):
     db_path, key_id = minimal_couplet_graph
     session_path = tmp_path / "term.md"
-    id_tools["start_session"](db_path=str(db_path), key_id=key_id, output_path=str(session_path))
+    id_tools["run_start_session"](
+        db_path=str(db_path), key_id=key_id, output_path=str(session_path)
+    )
 
     for _ in range(3):
-        result = id_tools["advance_session"](session_path=str(session_path), leg_label="A")
+        result = id_tools["run_advance_session"](session_path=str(session_path), leg_label="A")
         if result["status"] == "complete":
             break
 
     post = frontmatter.load(str(session_path))
     taxon_id = post.metadata["terminal_taxon_id"]
 
-    taxon_result = id_tools["get_taxon_description"](db_path=str(db_path), taxon_id=taxon_id)
+    taxon_result = id_tools["run_taxon_description"](db_path=str(db_path), taxon_id=taxon_id)
     assert taxon_result["name"] in {"Anopheles gambiae", "Culex pipiens", "Aedes aegypti"}
 
 
@@ -216,14 +222,16 @@ def test_resume_complete_session_returns_complete_status(
 ):
     db_path, key_id = minimal_couplet_graph
     session_path = tmp_path / "done.md"
-    id_tools["start_session"](db_path=str(db_path), key_id=key_id, output_path=str(session_path))
+    id_tools["run_start_session"](
+        db_path=str(db_path), key_id=key_id, output_path=str(session_path)
+    )
 
     for _ in range(3):
-        r = id_tools["advance_session"](session_path=str(session_path), leg_label="A")
+        r = id_tools["run_advance_session"](session_path=str(session_path), leg_label="A")
         if r["status"] == "complete":
             break
 
-    result = id_tools["resume_session"](session_path=str(session_path))
+    result = id_tools["run_resume_session"](session_path=str(session_path))
     assert result["status"] == "complete"
 
 
@@ -234,7 +242,7 @@ def test_resume_complete_session_returns_complete_status(
 
 def test_look_ahead_returns_both_branches(id_tools, session_file: tuple[Path, Path, str]):
     session_path, _, _ = session_file
-    result = id_tools["look_ahead"](session_path=str(session_path), depth=3)
+    result = id_tools["run_look_ahead"](session_path=str(session_path), depth=3)
     assert "branch_A" in result
     assert "branch_B" in result
     assert isinstance(result["branch_A"], list)
@@ -245,7 +253,7 @@ def test_look_ahead_depth_limits_results(id_tools, session_file: tuple[Path, Pat
     session_path, _, _ = session_file
     # depth=1 from couplet 1: each branch points to another couplet, not a terminal
     # so both should be empty or just leaves if resolved within depth
-    result = id_tools["look_ahead"](session_path=str(session_path), depth=1)
+    result = id_tools["run_look_ahead"](session_path=str(session_path), depth=1)
     # No assertion on count since depth=1 may or may not reach terminals;
     # but the call must not raise.
     assert "branch_A" in result
@@ -255,7 +263,7 @@ def test_look_ahead_finds_terminals_at_sufficient_depth(
     id_tools, session_file: tuple[Path, Path, str]
 ):
     session_path, _, _ = session_file
-    result = id_tools["look_ahead"](session_path=str(session_path), depth=5)
+    result = id_tools["run_look_ahead"](session_path=str(session_path), depth=5)
     all_terminals = result["branch_A"] + result["branch_B"]
     assert len(all_terminals) > 0
     for t in all_terminals:
@@ -366,7 +374,7 @@ def test_lookup_term_exact_match(id_tools, minimal_couplet_graph: tuple[Path, st
             (term_id, "seta", "A bristle or hair-like structure"),
         )
 
-    result = id_tools["lookup_term"](db_path=str(db_path), term="seta")
+    result = id_tools["run_lookup_term"](db_path=str(db_path), term="seta")
     assert result["match_type"] == "exact"
     assert "bristle" in result["definition"].lower()
 
@@ -384,7 +392,7 @@ def test_lookup_term_fts_fallback(id_tools, minimal_couplet_graph: tuple[Path, s
             (term_id, "glossary", "tergite", "A dorsal sclerite of an abdominal segment"),
         )
 
-    result = id_tools["lookup_term"](db_path=str(db_path), term="tergite")
+    result = id_tools["run_lookup_term"](db_path=str(db_path), term="tergite")
     # May match exact or FTS depending on normalisation
     assert result["match_type"] in ("exact", "fts_suggestions")
 
@@ -393,7 +401,7 @@ def test_lookup_term_missing_returns_none_definition(
     id_tools, minimal_couplet_graph: tuple[Path, str]
 ):
     db_path, _ = minimal_couplet_graph
-    result = id_tools["lookup_term"](db_path=str(db_path), term="xyzzy_no_such_term")
+    result = id_tools["run_lookup_term"](db_path=str(db_path), term="xyzzy_no_such_term")
     assert result["definition"] is None
 
 
@@ -412,13 +420,13 @@ def test_search_taxa_finds_seeded_taxon(id_tools, minimal_couplet_graph: tuple[P
             (taxon_id, "taxon", "Aedes aegypti", "Small mosquito with lyre markings"),
         )
 
-    result = id_tools["search_taxa"](db_path=str(db_path), query="Aedes")
+    result = id_tools["run_search_taxa"](db_path=str(db_path), query="Aedes")
     assert any("Aedes" in r["name"] for r in result["results"])
 
 
 def test_search_taxa_empty_for_no_match(id_tools, minimal_couplet_graph: tuple[Path, str]):
     db_path, _ = minimal_couplet_graph
-    result = id_tools["search_taxa"](db_path=str(db_path), query="xyzzy_impossible_query_42")
+    result = id_tools["run_search_taxa"](db_path=str(db_path), query="xyzzy_impossible_query_42")
     assert result["results"] == []
 
 
@@ -429,7 +437,7 @@ def test_search_taxa_empty_for_no_match(id_tools, minimal_couplet_graph: tuple[P
 
 def test_list_keys_no_filter_returns_all(id_tools, minimal_couplet_graph: tuple[Path, str]):
     db_path, key_id = minimal_couplet_graph
-    result = id_tools["list_keys"](db_path=str(db_path))
+    result = id_tools["run_list_keys"](db_path=str(db_path))
     assert len(result["keys"]) >= 1
     assert any(k["key_id"] == key_id for k in result["keys"])
 
@@ -438,5 +446,5 @@ def test_list_keys_taxon_filter_no_match_returns_empty(
     id_tools, minimal_couplet_graph: tuple[Path, str]
 ):
     db_path, _ = minimal_couplet_graph
-    result = id_tools["list_keys"](db_path=str(db_path), taxon_name="NonexistentTaxon_xyz")
+    result = id_tools["run_list_keys"](db_path=str(db_path), taxon_name="NonexistentTaxon_xyz")
     assert result["keys"] == []

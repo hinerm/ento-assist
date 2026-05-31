@@ -26,6 +26,10 @@ src/ento_assist/
     merge.py           — CLI utility to merge two SQLite databases
 ```
 
+## Code Style
+
+- Maximum line length is **100 characters**.
+
 ## Key Conventions
 
 - All primary keys are UUID TEXT (for merge-by-ATTACH portability).
@@ -42,8 +46,8 @@ src/ento_assist/
 The `SERVER_INSTRUCTIONS` string in `server.py` defines mandatory workflow rules.
 The agent MUST:
 - Show users the extraction preview before committing any key data.
-- Wait for explicit user approval before calling `commit_extraction`.
-- Wait for explicit user input (A or B) before calling `advance_session`.
+- Wait for explicit user approval before calling `build_commit_extraction`.
+- Wait for explicit user input (A or B) before calling `run_advance_session`.
 - Present the terminal taxon description and ask for user confirmation before
   concluding any identification.
 

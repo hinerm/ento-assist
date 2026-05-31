@@ -95,19 +95,19 @@ _SAMPLE_COUPLETS = [
 
 
 def test_ingest_document_returns_doc_id(ingestion_tools, sample_pdf_path: Path):
-    result = ingestion_tools["ingest_document"](path=str(sample_pdf_path), title="Test Key")
+    result = ingestion_tools["build_register_document"](path=str(sample_pdf_path), title="Test Key")
     doc_id = result["doc_id"]
     uuid.UUID(doc_id)  # Must be valid UUID
 
 
 def test_ingest_document_page_count_positive(ingestion_tools, sample_pdf_path: Path):
-    result = ingestion_tools["ingest_document"](path=str(sample_pdf_path), title="Test Key")
+    result = ingestion_tools["build_register_document"](path=str(sample_pdf_path), title="Test Key")
     assert int(result["page_count"]) > 0
 
 
 def test_ingest_document_creates_documents_row(ingestion_tools, sample_pdf_path: Path):
     db_path = ingestion_tools["_db_path"]
-    result = ingestion_tools["ingest_document"](path=str(sample_pdf_path), title="Test Key")
+    result = ingestion_tools["build_register_document"](path=str(sample_pdf_path), title="Test Key")
     doc_id = result["doc_id"]
     with get_connection(db_path) as conn:
         row = conn.execute("SELECT title FROM documents WHERE id = ?", (doc_id,)).fetchone()
@@ -121,21 +121,25 @@ def test_ingest_document_creates_documents_row(ingestion_tools, sample_pdf_path:
 
 
 def test_scan_document_returns_structure(ingestion_tools, sample_pdf_path: Path):
-    result_reg = ingestion_tools["ingest_document"](path=str(sample_pdf_path), title="Scan Test")
+    result_reg = ingestion_tools["build_register_document"](
+        path=str(sample_pdf_path), title="Scan Test"
+    )
     doc_id = result_reg["doc_id"]
 
-    result_scan = ingestion_tools["scan_document_structure"](doc_id=doc_id)
+    result_scan = ingestion_tools["build_scan_document"](doc_id=doc_id)
     assert "page_count" in result_scan
     assert "detected_regions" in result_scan
     assert isinstance(result_scan["detected_regions"], list)
 
 
 def test_scan_document_page_count_matches_registration(ingestion_tools, sample_pdf_path: Path):
-    result_reg = ingestion_tools["ingest_document"](path=str(sample_pdf_path), title="Scan Test")
+    result_reg = ingestion_tools["build_register_document"](
+        path=str(sample_pdf_path), title="Scan Test"
+    )
     doc_id = result_reg["doc_id"]
     page_count_reg = int(result_reg["page_count"])
 
-    result_scan = ingestion_tools["scan_document_structure"](doc_id=doc_id)
+    result_scan = ingestion_tools["build_scan_document"](doc_id=doc_id)
     assert result_scan["page_count"] == page_count_reg
 
 
@@ -147,11 +151,13 @@ def test_scan_document_page_count_matches_registration(ingestion_tools, sample_p
 def test_propose_key_structure_returns_extraction_id(ingestion_tools, sample_pdf_path: Path):
     from tests.conftest import FIXTURE_PDF_KEY_PAGE
 
-    result_reg = ingestion_tools["ingest_document"](path=str(sample_pdf_path), title="Propose Test")
+    result_reg = ingestion_tools["build_register_document"](
+        path=str(sample_pdf_path), title="Propose Test"
+    )
     doc_id = result_reg["doc_id"]
 
     page = FIXTURE_PDF_KEY_PAGE if FIXTURE_PDF_KEY_PAGE else 1
-    result = ingestion_tools["propose_key_structure"](
+    result = ingestion_tools["build_propose_key"](
         doc_id=doc_id, page_start=page, page_end=page, title="Test Key"
     )
     assert "extraction_id" in result
@@ -161,11 +167,13 @@ def test_propose_key_structure_returns_extraction_id(ingestion_tools, sample_pdf
 def test_propose_key_structure_returns_raw_pages(ingestion_tools, sample_pdf_path: Path):
     from tests.conftest import FIXTURE_PDF_KEY_PAGE
 
-    result_reg = ingestion_tools["ingest_document"](path=str(sample_pdf_path), title="Propose Test")
+    result_reg = ingestion_tools["build_register_document"](
+        path=str(sample_pdf_path), title="Propose Test"
+    )
     doc_id = result_reg["doc_id"]
 
     page = FIXTURE_PDF_KEY_PAGE if FIXTURE_PDF_KEY_PAGE else 1
-    result = ingestion_tools["propose_key_structure"](
+    result = ingestion_tools["build_propose_key"](
         doc_id=doc_id, page_start=page, page_end=page, title="Test Key"
     )
     assert "pages" in result
@@ -184,10 +192,12 @@ def _propose(ingestion_tools, sample_pdf_path: Path) -> tuple[str, str]:
     """Helper: register + propose; returns (doc_id, extraction_id)."""
     from tests.conftest import FIXTURE_PDF_KEY_PAGE
 
-    result_reg = ingestion_tools["ingest_document"](path=str(sample_pdf_path), title="Preview Test")
+    result_reg = ingestion_tools["build_register_document"](
+        path=str(sample_pdf_path), title="Preview Test"
+    )
     doc_id = result_reg["doc_id"]
     page = FIXTURE_PDF_KEY_PAGE if FIXTURE_PDF_KEY_PAGE else 1
-    result = ingestion_tools["propose_key_structure"](
+    result = ingestion_tools["build_propose_key"](
         doc_id=doc_id, page_start=page, page_end=page, title="Preview Key"
     )
     return doc_id, result["extraction_id"]
@@ -196,7 +206,7 @@ def _propose(ingestion_tools, sample_pdf_path: Path) -> tuple[str, str]:
 def _propose_and_submit(ingestion_tools, sample_pdf_path: Path) -> tuple[str, str]:
     """Helper: register + propose + submit; returns (doc_id, extraction_id)."""
     doc_id, extraction_id = _propose(ingestion_tools, sample_pdf_path)
-    ingestion_tools["submit_key_structure"](
+    ingestion_tools["build_submit_key"](
         extraction_id=extraction_id, couplets=_SAMPLE_COUPLETS, title="Preview Key"
     )
     return doc_id, extraction_id
@@ -205,14 +215,14 @@ def _propose_and_submit(ingestion_tools, sample_pdf_path: Path) -> tuple[str, st
 def test_get_extraction_preview_awaiting_structure(ingestion_tools, sample_pdf_path: Path):
     """Before submit_key_structure, preview returns raw pages."""
     _, extraction_id = _propose(ingestion_tools, sample_pdf_path)
-    preview = ingestion_tools["get_extraction_preview"](extraction_id=extraction_id)
+    preview = ingestion_tools["build_preview_extraction"](extraction_id=extraction_id)
     assert preview["status"] == "awaiting_structure"
     assert "pages" in preview
 
 
 def test_get_extraction_preview_returns_couplets(ingestion_tools, sample_pdf_path: Path):
     _, extraction_id = _propose_and_submit(ingestion_tools, sample_pdf_path)
-    preview = ingestion_tools["get_extraction_preview"](extraction_id=extraction_id)
+    preview = ingestion_tools["build_preview_extraction"](extraction_id=extraction_id)
     assert "couplets" in preview
     assert isinstance(preview["couplets"], list)
     assert len(preview["couplets"]) == len(_SAMPLE_COUPLETS)
@@ -220,7 +230,7 @@ def test_get_extraction_preview_returns_couplets(ingestion_tools, sample_pdf_pat
 
 def test_get_extraction_preview_invalid_id_raises(ingestion_tools, sample_pdf_path: Path):
     with pytest.raises((ValueError, KeyError)):
-        ingestion_tools["get_extraction_preview"](extraction_id=str(uuid.uuid4()))
+        ingestion_tools["build_preview_extraction"](extraction_id=str(uuid.uuid4()))
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +240,7 @@ def test_get_extraction_preview_invalid_id_raises(ingestion_tools, sample_pdf_pa
 
 def test_submit_key_structure_returns_couplet_count(ingestion_tools, sample_pdf_path: Path):
     _, extraction_id = _propose(ingestion_tools, sample_pdf_path)
-    result = ingestion_tools["submit_key_structure"](
+    result = ingestion_tools["build_submit_key"](
         extraction_id=extraction_id, couplets=_SAMPLE_COUPLETS
     )
     assert result["couplet_count"] == len(_SAMPLE_COUPLETS)
@@ -238,15 +248,15 @@ def test_submit_key_structure_returns_couplet_count(ingestion_tools, sample_pdf_
 
 def test_submit_key_structure_missing_id_raises(ingestion_tools, sample_pdf_path: Path):
     with pytest.raises((ValueError, KeyError)):
-        ingestion_tools["submit_key_structure"](
+        ingestion_tools["build_submit_key"](
             extraction_id=str(uuid.uuid4()), couplets=_SAMPLE_COUPLETS
         )
 
 
 def test_submit_key_structure_stores_leg_texts(ingestion_tools, sample_pdf_path: Path):
     _, extraction_id = _propose(ingestion_tools, sample_pdf_path)
-    ingestion_tools["submit_key_structure"](extraction_id=extraction_id, couplets=_SAMPLE_COUPLETS)
-    preview = ingestion_tools["get_extraction_preview"](extraction_id=extraction_id)
+    ingestion_tools["build_submit_key"](extraction_id=extraction_id, couplets=_SAMPLE_COUPLETS)
+    preview = ingestion_tools["build_preview_extraction"](extraction_id=extraction_id)
     first = preview["couplets"][0]
     assert first["leg_A"]["text"] == _SAMPLE_COUPLETS[0]["leg_a"]["text"]
     assert first["leg_B"]["terminal"] == _SAMPLE_COUPLETS[0]["leg_b"]["terminal"]
@@ -264,14 +274,14 @@ def test_correct_extraction_updates_lead_text(ingestion_tools, sample_pdf_path: 
     correction = [
         {"couplet_number": first_num, "leg": "A", "field": "text", "value": "CORRECTED TEXT"}
     ]
-    result = ingestion_tools["correct_extraction"](
+    result = ingestion_tools["build_correct_extraction"](
         extraction_id=extraction_id, corrections=correction
     )
     assert len(result["applied"]) == 1
     assert result["errors"] == []
 
     # Preview should reflect the change
-    updated = ingestion_tools["get_extraction_preview"](extraction_id=extraction_id)
+    updated = ingestion_tools["build_preview_extraction"](extraction_id=extraction_id)
     first_couplet = next(c for c in updated["couplets"] if c["number"] == first_num)
     assert first_couplet["leg_A"]["text"] == "CORRECTED TEXT"
 
@@ -285,7 +295,7 @@ def test_commit_extraction_writes_to_db(ingestion_tools, sample_pdf_path: Path):
     db_path = ingestion_tools["_db_path"]
     _, extraction_id = _propose_and_submit(ingestion_tools, sample_pdf_path)
 
-    result = ingestion_tools["commit_extraction"](extraction_id=extraction_id)
+    result = ingestion_tools["build_commit_extraction"](extraction_id=extraction_id)
     key_id = result["key_id"]
 
     with get_connection(db_path) as conn:
@@ -299,19 +309,19 @@ def test_commit_extraction_writes_to_db(ingestion_tools, sample_pdf_path: Path):
 def test_commit_extraction_without_submit_raises(ingestion_tools, sample_pdf_path: Path):
     """commit_extraction before submit_key_structure must raise."""
     _, extraction_id = _propose(ingestion_tools, sample_pdf_path)
-    with pytest.raises(ValueError, match="submit_key_structure"):
-        ingestion_tools["commit_extraction"](extraction_id=extraction_id)
+    with pytest.raises(ValueError, match="build_submit_key"):
+        ingestion_tools["build_commit_extraction"](extraction_id=extraction_id)
 
 
 def test_commit_extraction_removes_from_pending(ingestion_tools, sample_pdf_path: Path):
     _, extraction_id = _propose_and_submit(ingestion_tools, sample_pdf_path)
-    ingestion_tools["commit_extraction"](extraction_id=extraction_id)
+    ingestion_tools["build_commit_extraction"](extraction_id=extraction_id)
     assert extraction_id not in _pending_extractions
 
 
 def test_commit_invalid_id_raises(ingestion_tools, sample_pdf_path: Path):
     with pytest.raises((ValueError, KeyError)):
-        ingestion_tools["commit_extraction"](extraction_id=str(uuid.uuid4()))
+        ingestion_tools["build_commit_extraction"](extraction_id=str(uuid.uuid4()))
 
 
 # ---------------------------------------------------------------------------
@@ -322,12 +332,12 @@ def test_commit_invalid_id_raises(ingestion_tools, sample_pdf_path: Path):
 def test_add_glossary_term_queryable_via_fts(ingestion_tools, sample_pdf_path: Path):
     db_path = ingestion_tools["_db_path"]
 
-    result_reg = ingestion_tools["ingest_document"](
+    result_reg = ingestion_tools["build_register_document"](
         path=str(sample_pdf_path), title="Glossary Test"
     )
     doc_id = result_reg["doc_id"]
 
-    ingestion_tools["add_glossary_term"](
+    ingestion_tools["build_add_term"](
         term="scutellum",
         definition="The posterior portion of the mesonotum",
         doc_id=doc_id,
@@ -349,10 +359,12 @@ def test_add_glossary_term_queryable_via_fts(ingestion_tools, sample_pdf_path: P
 def test_add_taxon_description_creates_row(ingestion_tools, sample_pdf_path: Path):
     db_path = ingestion_tools["_db_path"]
 
-    result_reg = ingestion_tools["ingest_document"](path=str(sample_pdf_path), title="Taxon Test")
+    result_reg = ingestion_tools["build_register_document"](
+        path=str(sample_pdf_path), title="Taxon Test"
+    )
     doc_id = result_reg["doc_id"]
 
-    ingestion_tools["add_taxon_description"](
+    ingestion_tools["build_add_taxon"](
         taxon_name="Aedes aegypti",
         rank="species",
         description="Small mosquito with characteristic lyre-shaped markings",

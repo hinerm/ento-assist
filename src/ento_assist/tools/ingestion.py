@@ -56,10 +56,10 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         description=(
             "Register a PDF document in the database. Stores only a single metadata row "
             "(title, path, source type) — the PDF is not read or modified. "
-            "Returns the doc_id UUID. ALWAYS call scan_document_structure next."
+            "Returns the doc_id UUID. ALWAYS call build_scan_document next."
         )
     )
-    def ingest_document(path: str, title: str, source_type: str = "pdf") -> dict[str, str]:
+    def build_register_document(path: str, title: str, source_type: str = "pdf") -> dict[str, str]:
         """Register a PDF document.
 
         Args:
@@ -74,7 +74,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             "doc_id": doc_id,
             "title": title,
             "page_count": str(page_count),
-            "message": f"Document registered. Call scan_document_structure('{doc_id}') next.",
+            "message": f"Document registered. Call build_scan_document('{doc_id}') next.",
         }
 
     # ------------------------------------------------------------------
@@ -85,10 +85,10 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         description=(
             "Scan all pages of a document to produce a table of contents: detected keys, "
             "page ranges, and section headings. Present results to the user for confirmation "
-            "before calling propose_key_structure on any region."
+            "before calling build_propose_key on any region."
         )
     )
-    def scan_document_structure(doc_id: str) -> dict[str, Any]:
+    def build_scan_document(doc_id: str) -> dict[str, Any]:
         """Scan a document and return its detected structure.
 
         Args:
@@ -117,7 +117,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             ],
             "message": (
                 "Review the detected regions with the user. Confirm or correct page "
-                "boundaries before calling propose_key_structure."
+                "boundaries before calling build_propose_key."
             ),
         }
 
@@ -129,10 +129,10 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         description=(
             "Return the text content of a single page for the LLM to read and parse. "
             "Pages are 1-indexed for consistency with printed page numbers shown to the user. "
-            "If the result starts with [IMAGE-ONLY], call run_page_ocr instead."
+            "If the result starts with [IMAGE-ONLY], call build_ocr_page instead."
         )
     )
-    def get_page_text_tool(doc_id: str, page_num: int) -> dict[str, Any]:
+    def build_get_page_text(doc_id: str, page_num: int) -> dict[str, Any]:
         """Get the text content of a page.
 
         Args:
@@ -146,17 +146,17 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             "doc_id": doc_id,
             "page_num": page_num,
             "image_only": image_only,
-            "text": text if not image_only else "[IMAGE-ONLY PAGE — use run_page_ocr]",
+            "text": text if not image_only else "[IMAGE-ONLY PAGE — use build_ocr_page]",
         }
 
     @mcp.tool(
         description=(
             "Run OCR on a single image-only page and return the extracted text. "
-            "Use only when get_page_text_tool returns image_only=true. "
+            "Use only when build_get_page_text returns image_only=true. "
             "Results are transient — not stored in the database."
         )
     )
-    def run_page_ocr(doc_id: str, page_num: int) -> dict[str, Any]:
+    def build_ocr_page(doc_id: str, page_num: int) -> dict[str, Any]:
         """Run OCR on an image-only page.
 
         Args:
@@ -175,7 +175,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             "or verify couplet text."
         )
     )
-    def get_page_image(doc_id: str, page_num: int, dpi: int = 150) -> Image:
+    def build_get_page_image(doc_id: str, page_num: int, dpi: int = 150) -> Image:
         """Render a page image for the user to view.
 
         Args:
@@ -195,12 +195,12 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         description=(
             "Fetch the raw text of a page range and store it as a pending extraction. "
             "Returns the page text directly so the LLM can read and interpret it. "
-            "PRECONDITION: scan_document_structure has been reviewed and page boundaries "
+            "PRECONDITION: build_scan_document has been reviewed and page boundaries "
             "confirmed with the user. After reading the text and discussing couplet format "
-            "with the user, call submit_key_structure with your interpretation."
+            "with the user, call build_submit_key with your interpretation."
         )
     )
-    def propose_key_structure(
+    def build_propose_key(
         doc_id: str,
         page_start: int,
         page_end: int,
@@ -241,7 +241,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             "pages": [{"page_num": pn + 1, "text": text} for pn, text in raw_pages],
             "message": (
                 f"Read the page text above and discuss the couplet format with the user. "
-                f"Then call submit_key_structure('{extraction_id}', couplets=[...]) "
+                f"Then call build_submit_key('{extraction_id}', couplets=[...]) "
                 f"with your interpretation."
             ),
         }
@@ -249,14 +249,14 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
     @mcp.tool(
         description=(
             "Submit the LLM's interpretation of a key's couplet structure for user review. "
-            "Call this after reading the page text from propose_key_structure and discussing "
+            "Call this after reading the page text from build_propose_key and discussing "
             "the couplet numbering format with the user. Each couplet needs a number and "
             "two legs (A and B); each leg must have text plus either a goto couplet number "
-            "or a terminal taxon name (not both). After submitting, call get_extraction_preview "
+            "or a terminal taxon name (not both). After submitting, call build_preview_extraction "
             "and show the result to the user for approval."
         )
     )
-    def submit_key_structure(
+    def build_submit_key(
         extraction_id: str,
         couplets: list[dict[str, Any]],
         title: str = "",
@@ -264,14 +264,14 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         """Submit a structured key interpretation for user review.
 
         Args:
-            extraction_id: UUID returned by propose_key_structure.
+            extraction_id: UUID returned by build_propose_key.
             couplets: List of couplet dicts. Each must have:
                 - "number": str  (e.g. "1", "1a")
                 - "page": int    (1-indexed)
                 - "leg_a": dict with "text" (str), "goto" (str|null),
                            "terminal" (str|null), "figures" (list[str])
                 - "leg_b": dict with the same fields as leg_a
-            title: Optional key title; overrides the title from propose_key_structure.
+            title: Optional key title; overrides the title from build_propose_key.
 
         Example couplet::
 
@@ -340,8 +340,8 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             "couplet_count": len(proposed_couplets),
             "message": (
                 f"Structure submitted with {len(proposed_couplets)} couplets. "
-                f"Call get_extraction_preview('{extraction_id}') to review, "
-                f"then commit_extraction when approved."
+                f"Call build_preview_extraction('{extraction_id}') to review, "
+                f"then build_commit_extraction when approved."
             ),
         }
 
@@ -350,14 +350,14 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             "Return a human-readable preview of a pending extraction for spot-checking. "
             "Show the couplets and page references to the user. "
             "Low-confidence couplets (< 0.7) should be highlighted for careful review. "
-            "Call correct_extraction if corrections are needed, then commit_extraction."
+            "Call build_correct_extraction if corrections are needed, then build_commit_extraction."
         )
     )
-    def get_extraction_preview(extraction_id: str) -> dict[str, Any]:
+    def build_preview_extraction(extraction_id: str) -> dict[str, Any]:
         """Get a reviewable preview of a pending extraction.
 
         Args:
-            extraction_id: UUID returned by propose_key_structure.
+            extraction_id: UUID returned by build_propose_key.
         """
         entry = _pending_extractions.get(extraction_id)
         if entry is None:
@@ -372,7 +372,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
                 "pages": [
                     {"page_num": pn + 1, "text": text} for pn, text in entry.get("raw_pages", [])
                 ],
-                "message": "No structure submitted yet. Call submit_key_structure first.",
+                "message": "No structure submitted yet. Call build_submit_key first.",
             }
 
         couplet_previews = []
@@ -411,17 +411,17 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         description=(
             "Apply corrections to a pending extraction before committing. "
             "Each correction specifies a couplet number and the field to fix. "
-            "Can be called multiple times before commit_extraction."
+            "Can be called multiple times before build_commit_extraction."
         )
     )
-    def correct_extraction(
+    def build_correct_extraction(
         extraction_id: str,
         corrections: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Apply corrections to a pending extraction.
 
         Args:
-            extraction_id: UUID returned by propose_key_structure.
+            extraction_id: UUID returned by build_propose_key.
             corrections: List of correction dicts. Each must have:
                 - "couplet_number": str (e.g. "3")
                 - "leg": "A" or "B"
@@ -439,7 +439,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         if proposed is None:
             raise ValueError(
                 f"Extraction {extraction_id} has no submitted structure. "
-                "Call submit_key_structure first."
+                "Call build_submit_key first."
             )
 
         applied = []
@@ -483,16 +483,16 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
     @mcp.tool(
         description=(
             "Commit a reviewed and corrected extraction to the database. "
-            "PRECONDITION: get_extraction_preview has been shown to the user and they "
+            "PRECONDITION: build_preview_extraction has been shown to the user and they "
             "have explicitly approved the extraction. Do NOT call this without user approval. "
             "Returns the key_id and a summary of committed couplets."
         )
     )
-    def commit_extraction(extraction_id: str) -> dict[str, Any]:
+    def build_commit_extraction(extraction_id: str) -> dict[str, Any]:
         """Write a validated couplet graph to the database.
 
         Args:
-            extraction_id: UUID returned by propose_key_structure.
+            extraction_id: UUID returned by build_propose_key.
         """
         entry = _pending_extractions.get(extraction_id)
         if entry is None:
@@ -502,7 +502,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         if proposed is None:
             raise ValueError(
                 f"Extraction {extraction_id} has no submitted structure. "
-                "Call submit_key_structure first."
+                "Call build_submit_key first."
             )
 
         doc_id: str = entry["doc_id"]
@@ -564,7 +564,8 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             "couplets_committed": len(proposed.couplets),
             "message": (
                 f"Key '{proposed.title}' committed with {len(proposed.couplets)} couplets. "
-                f"key_id={key_id}. You can now link figures or add taxon descriptions."
+                f"key_id={key_id}. "
+                "You can now call build_crop_figure/build_link_figure or build_add_taxon."
             ),
         }
 
@@ -577,10 +578,10 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             "Crop a rectangular region from a page and store it as a figure BLOB. "
             "Coordinates are in PDF points (72pt = 1 inch) at the native page scale. "
             "Use after the user has described a figure's location from the displayed page image. "
-            "Returns fig_id. Call link_figure to associate with a couplet leg."
+            "Returns fig_id. Call build_link_figure to associate with a couplet leg."
         )
     )
-    def crop_figure(
+    def build_crop_figure(
         doc_id: str,
         page_num: int,
         x0: float,
@@ -612,7 +613,8 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         return {
             "fig_id": fig_id,
             "message": (
-                f"Figure stored. Call link_figure('{fig_id}', leg_id, ref_text) to associate it."
+                f"Figure stored. "
+                f"Call build_link_figure('{fig_id}', leg_id, ref_text) to associate it."
             ),
         }
 
@@ -623,7 +625,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             "for inline/unlabeled figures identified interactively with the user."
         )
     )
-    def link_figure(fig_id: str, leg_id: str, ref_text: str = "") -> dict[str, str]:
+    def build_link_figure(fig_id: str, leg_id: str, ref_text: str = "") -> dict[str, str]:
         """Link a figure to a couplet leg.
 
         Args:
@@ -647,10 +649,10 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         description=(
             "Add a morphological or anatomical term and its definition to the glossary. "
             "If the term already exists, the call is silently ignored (no overwrite). "
-            "Use add_taxon_description for taxon-level prose descriptions."
+            "Use build_add_taxon for taxon-level prose descriptions."
         )
     )
-    def add_glossary_term(
+    def build_add_term(
         term: str,
         definition: str,
         doc_id: str,
@@ -686,7 +688,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             "Used during identification to verify a terminal taxon match."
         )
     )
-    def add_taxon_description(
+    def build_add_taxon(
         taxon_name: str,
         rank: str,
         description: str,
