@@ -28,6 +28,7 @@ from mcp.server.fastmcp import FastMCP
 
 from ento_assist.tools.identification import register_identification_tools
 from ento_assist.tools.ingestion import register_ingestion_tools
+from ento_assist.tools.system import register_system_tools
 
 # ---------------------------------------------------------------------------
 # Human-in-the-loop workflow instructions
@@ -156,6 +157,7 @@ def build_server(db_path: str | Path) -> FastMCP:
     mcp = FastMCP("ento-assist", instructions=SERVER_INSTRUCTIONS)
     register_ingestion_tools(mcp, db_path)
     register_identification_tools(mcp)
+    register_system_tools(mcp)
     return mcp
 
 
