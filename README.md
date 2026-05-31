@@ -23,6 +23,7 @@ general-purpose and works for any group covered by a dichotomous key.
 - [Configuration](#configuration)
 - [Running the server](#running-the-server)
 - [Connecting an MCP client](#connecting-an-mcp-client)
+- [VS Code GitHub Copilot agent](#vs-code-github-copilot-agent)
 - [Workflow overview](#workflow-overview)
   - [Ingestion](#ingestion-mode-building-the-knowledge-base)
   - [Identification](#identification-mode-identifying-a-specimen)
@@ -146,6 +147,48 @@ Add an entry to your `claude_desktop_config.json`, with `ENTO_DB_PATH` edited as
 Any client that launches a stdio MCP server can use the same pattern:
 command `uv`, args `["--directory", "<repo>", "run", "ento-assist"]`,
 with `ENTO_DB_PATH` set in the environment.
+
+---
+
+## VS Code GitHub Copilot agent
+
+The repository ships a custom **Ento-Assist** agent for VS Code GitHub Copilot that restricts
+the agent to only the ento-assist MCP tools, sets an appropriate entomological persona, and
+wires up workflow skills as slash commands.
+
+### File locations
+
+| File | Purpose |
+|------|---------|
+| `.github/agents/ento-assist.agent.md` | Custom agent definition |
+| `.github/skills/ento-ingestion/SKILL.md` | Ingestion workflow skill (`/ento-ingestion`) |
+| `.github/skills/ento-identification/SKILL.md` | Identification workflow skill (`/ento-identification`) |
+
+### Using the agent
+
+1. Open the Copilot chat panel in VS Code.
+2. Click the agent selector (the `@` or mode dropdown) and choose **Ento-Assist**.
+3. The agent uses only the ento-assist MCP server tools — no file editing, web search,
+   or shell access.
+
+### Workflow slash commands
+
+Type `/` in the Copilot chat to see the available skill commands:
+
+| Command | When to use |
+|---------|-------------|
+| `/ento-ingestion` | Start an ingestion session (PDF → database) |
+| `/ento-identification` | Start or resume a specimen identification session |
+
+### Example prompts
+
+```
+# Ingestion
+Register /books/Townes1969.pdf, title "Townes 1969 Ichneumonidae vol 1"
+
+# Identification
+List available keys for Ichneumonidae and start an identification session
+```
 
 ---
 
