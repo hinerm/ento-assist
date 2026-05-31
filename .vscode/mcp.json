@@ -1,0 +1,17 @@
+{
+	"servers": {
+		"ento-assist": {
+			"type": "stdio",
+			"command": "uv",
+			"args": [
+				"--directory",
+				"/Users/hiner/code/hinerm/ento-assist",
+				"run",
+				"ento-assist"
+			],
+			"env": {
+				"ENTO_DB_PATH": "${env:ENTO_DB_PATH}"
+			}
+		}
+	}
+}
