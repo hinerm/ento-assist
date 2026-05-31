@@ -267,7 +267,25 @@ uv sync --group dev
 uv run pre-commit install
 ```
 
-### Running checks
+### Pre-commit hooks
+
+Hooks run automatically on `git commit` once installed, to verify core repository health:
+1. General hygiene (trailing whitespace, YAML/TOML validity, large-file guard)
+2. `ruff` lint + auto-fix, then `ruff-format`
+3. `insert-license` to verify `.py` files have up-to-date license headers
+4. `mypy` type checking on `src/`
+
+If a commit is rejected, many issues (formatting, import order, license headers)
+will have been auto-fixed in place. Simply stage the modified files and retry
+the commit.
+
+To run all hooks manually against every file (useful after cloning or rebasing):
+
+```bash
+uv run pre-commit run --all-files
+```
+
+### Running checks manually
 
 ```bash
 # Format + lint
@@ -279,18 +297,7 @@ uv run mypy src/
 
 # Tests with coverage
 uv run pytest
-
-# Run all pre-commit hooks against every file (useful after cloning or rebasing)
-uv run pre-commit run --all-files
 ```
-
-### Pre-commit hooks
-
-Hooks run automatically on `git commit` once installed:
-1. General hygiene (trailing whitespace, YAML/TOML validity, large-file guard)
-2. `ruff` lint + auto-fix, then `ruff-format`
-3. License header enforcement — inserts the two-line header from `license_header.txt` into any `.py` file that is missing it; the commit is aborted so you can review and re-stage
-4. `mypy` type checking on `src/`
 
 ### Notes for contributors
 
