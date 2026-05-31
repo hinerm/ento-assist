@@ -5,7 +5,7 @@
 			"command": "uv",
 			"args": [
 				"--directory",
-				"/Users/hiner/code/hinerm/ento-assist",
+				"${workspaceFolder}",
 				"run",
 				"ento-assist"
 			],
