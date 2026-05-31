@@ -276,4 +276,4 @@ Hooks run automatically on `git commit`:
 
 ## License
 
-MIT — see [license_header.txt](license_header.txt).
+MIT — see [LICENSE](LICENSE).
