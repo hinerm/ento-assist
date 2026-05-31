@@ -1,3 +1,6 @@
+# Copyright 2026 The ento-assist Authors
+# SPDX-License-Identifier: MIT
+
 """OCR fallback for image-only PDF pages using surya-ocr.
 
 Used when a page has no extractable text layer (e.g. phone-scanned documents
@@ -46,7 +49,6 @@ def run_ocr(db_path: str | Path, doc_id: str, page_num: int) -> str:
         RuntimeError: If OCR fails for any reason.
     """
     try:
-        from surya.input.processing import open_pdf
         from surya.model.detection.model import load_model as load_det_model
         from surya.model.detection.processor import load_processor as load_det_processor
         from surya.model.recognition.model import load_model as load_rec_model
@@ -54,16 +56,16 @@ def run_ocr(db_path: str | Path, doc_id: str, page_num: int) -> str:
         from surya.ocr import run_ocr as surya_run_ocr
     except ImportError as exc:
         raise ImportError(
-            "surya-ocr is required for OCR on image-only pages. "
-            "Install it with: uv add surya-ocr"
+            "surya-ocr is required for OCR on image-only pages. Install it with: uv add surya-ocr"
         ) from exc
 
     # Render page to image for surya input
     image_bytes = render_page_image(db_path, doc_id, page_num, dpi=300)
 
     try:
-        from PIL import Image
         import io
+
+        from PIL import Image
 
         image = Image.open(io.BytesIO(image_bytes))
 

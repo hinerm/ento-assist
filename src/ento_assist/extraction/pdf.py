@@ -1,3 +1,6 @@
+# Copyright 2026 The ento-assist Authors
+# SPDX-License-Identifier: MIT
+
 """PDF extraction utilities for ento-assist.
 
 All operations are transient — nothing is bulk-stored in the database.
@@ -67,9 +70,7 @@ def register_document(
 def _open_pdf(db_path: str | Path, doc_id: str) -> fitz.Document:
     """Look up a document's path and return an open fitz.Document."""
     with get_connection(db_path) as conn:
-        row = conn.execute(
-            "SELECT path FROM documents WHERE id = ?", (doc_id,)
-        ).fetchone()
+        row = conn.execute("SELECT path FROM documents WHERE id = ?", (doc_id,)).fetchone()
     if row is None:
         raise ValueError(f"No document with id={doc_id}")
     return fitz.open(row["path"])
@@ -88,7 +89,7 @@ def get_page_text(db_path: str | Path, doc_id: str, page_num: int) -> str:
     """
     with _open_pdf(db_path, doc_id) as pdf:
         page = pdf[page_num]
-        return page.get_text("text")
+        return str(page.get_text("text"))
 
 
 def render_page_image(
@@ -116,7 +117,7 @@ def render_page_image(
         page = pdf[page_num]
         mat = fitz.Matrix(dpi / 72, dpi / 72)
         pix = page.get_pixmap(matrix=mat, alpha=False)
-        return pix.tobytes("png")
+        return bytes(pix.tobytes("png"))
 
 
 def crop_region(
@@ -140,4 +141,4 @@ def crop_region(
         mat = fitz.Matrix(dpi / 72, dpi / 72)
         clip = rect & page.rect  # clamp to page bounds
         pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False)
-        return pix.tobytes("png")
+        return bytes(pix.tobytes("png"))

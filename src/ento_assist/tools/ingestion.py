@@ -1,3 +1,6 @@
+# Copyright 2026 The ento-assist Authors
+# SPDX-License-Identifier: MIT
+
 """Ingestion MCP tools for ento-assist.
 
 These tools are exposed to the LLM during document ingestion sessions.
@@ -10,7 +13,6 @@ the extraction must be re-run (which is fast and deterministic).
 
 from __future__ import annotations
 
-import base64
 import json
 import uuid
 from pathlib import Path
@@ -26,6 +28,7 @@ from ento_assist.extraction.key_parser import (
 )
 from ento_assist.extraction.ocr import is_image_only, run_ocr
 from ento_assist.extraction.pdf import (
+    BBox,
     crop_region,
     get_page_count,
     get_page_text,
@@ -259,25 +262,27 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         proposed: ProposedKey = entry["proposed_key"]
         couplet_previews = []
         for c in proposed.couplets:
-            couplet_previews.append({
-                "number": c.number,
-                "page": c.page_ref + 1,  # 1-indexed
-                "confidence": round(c.confidence, 2),
-                "leg_A": {
-                    "text": c.leg_a.text[:200],
-                    "goto": c.leg_a.next_couplet_number,
-                    "terminal": c.leg_a.terminal_taxon_name,
-                    "figures": c.leg_a.figure_references,
-                    "confidence": round(c.leg_a.confidence, 2),
-                },
-                "leg_B": {
-                    "text": c.leg_b.text[:200],
-                    "goto": c.leg_b.next_couplet_number,
-                    "terminal": c.leg_b.terminal_taxon_name,
-                    "figures": c.leg_b.figure_references,
-                    "confidence": round(c.leg_b.confidence, 2),
-                },
-            })
+            couplet_previews.append(
+                {
+                    "number": c.number,
+                    "page": c.page_ref + 1,  # 1-indexed
+                    "confidence": round(c.confidence, 2),
+                    "leg_A": {
+                        "text": c.leg_a.text[:200],
+                        "goto": c.leg_a.next_couplet_number,
+                        "terminal": c.leg_a.terminal_taxon_name,
+                        "figures": c.leg_a.figure_references,
+                        "confidence": round(c.leg_a.confidence, 2),
+                    },
+                    "leg_B": {
+                        "text": c.leg_b.text[:200],
+                        "goto": c.leg_b.next_couplet_number,
+                        "terminal": c.leg_b.terminal_taxon_name,
+                        "figures": c.leg_b.figure_references,
+                        "confidence": round(c.leg_b.confidence, 2),
+                    },
+                }
+            )
         return {
             "extraction_id": extraction_id,
             "title": proposed.title,
@@ -389,9 +394,15 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             # Insert identification key (start_couplet_id set after)
             start_num = proposed.couplets[0].number if proposed.couplets else None
             conn.execute(
-                "INSERT INTO identification_keys (id, doc_id, title, scope_taxon_id, start_couplet_id) "
+                "INSERT INTO identification_keys "
+                "(id, doc_id, title, scope_taxon_id, start_couplet_id) "
                 "VALUES (?, ?, ?, NULL, ?)",
-                (key_id, doc_id, proposed.title, couplet_id_map.get(start_num) if start_num else None),
+                (
+                    key_id,
+                    doc_id,
+                    proposed.title,
+                    couplet_id_map.get(start_num) if start_num else None,
+                ),
             )
 
             for c in proposed.couplets:
@@ -458,7 +469,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             caption: Figure caption or description (may be empty for unlabeled figures).
         """
         idx = page_num - 1
-        bbox = {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
+        bbox: BBox = {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
         png_bytes = crop_region(db_path, doc_id, idx, bbox)
         fig_id = str(uuid.uuid4())
 
@@ -471,7 +482,9 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
 
         return {
             "fig_id": fig_id,
-            "message": f"Figure stored. Call link_figure('{fig_id}', leg_id, ref_text) to associate it.",
+            "message": (
+                f"Figure stored. Call link_figure('{fig_id}', leg_id, ref_text) to associate it."
+            ),
         }
 
     @mcp.tool(
@@ -531,7 +544,8 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             )
             # Update FTS index
             conn.execute(
-                "INSERT INTO fts_content (content_id, content_type, label, body) VALUES (?, ?, ?, ?)",
+                "INSERT INTO fts_content"
+                " (content_id, content_type, label, body) VALUES (?, ?, ?, ?)",
                 (term_id, "glossary", term, definition),
             )
         return {"message": f"Glossary term '{term}' added."}
@@ -594,7 +608,8 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
                 )
             # Update FTS
             conn.execute(
-                "INSERT INTO fts_content (content_id, content_type, label, body) VALUES (?, ?, ?, ?)",
+                "INSERT INTO fts_content"
+                " (content_id, content_type, label, body) VALUES (?, ?, ?, ?)",
                 (taxon_id, "taxon", taxon_name, description),
             )
 

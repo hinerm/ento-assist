@@ -1,3 +1,6 @@
+# Copyright 2026 The ento-assist Authors
+# SPDX-License-Identifier: MIT
+
 """Identification MCP tools for ento-assist.
 
 These tools are exposed to the LLM during specimen identification sessions.
@@ -32,14 +35,12 @@ terminal_taxon_id: null
 
 from __future__ import annotations
 
-import base64
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import frontmatter  # python-frontmatter
-
 from mcp.server.fastmcp import FastMCP, Image
 
 from ento_assist.db.connection import get_connection
@@ -139,7 +140,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
             raise ValueError(f"Key '{key_title}' has no start_couplet_id set.")
 
         session_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         metadata = {
             "session_id": session_id,
@@ -185,16 +186,19 @@ def register_identification_tools(mcp: FastMCP) -> None:
             session_path: Path to the session markdown file.
         """
         post = _load_session(session_path)
-        db_path = post.metadata["db_path"]
-        couplet_id = post.metadata["current_couplet_id"]
-        status = post.metadata.get("status", "in_progress")
+        db_path = str(post.metadata["db_path"])
+        couplet_id = str(post.metadata["current_couplet_id"])
+        status = str(post.metadata.get("status", "in_progress"))
 
         if status == "complete":
             terminal_id = post.metadata.get("terminal_taxon_id")
             return {
                 "status": "complete",
                 "terminal_taxon_id": terminal_id,
-                "message": "This session is already complete. Use get_taxon_description to review the result.",
+                "message": (
+                    "This session is already complete. "
+                    "Use get_taxon_description to review the result."
+                ),
             }
 
         couplet_data = _get_couplet_data(db_path, couplet_id)
@@ -218,8 +222,8 @@ def register_identification_tools(mcp: FastMCP) -> None:
             session_path: Path to the session markdown file.
         """
         post = _load_session(session_path)
-        db_path = post.metadata["db_path"]
-        couplet_id = post.metadata["current_couplet_id"]
+        db_path = str(post.metadata["db_path"])
+        couplet_id = str(post.metadata["current_couplet_id"])
         return _get_couplet_data(db_path, couplet_id)
 
     @mcp.tool(
@@ -241,8 +245,8 @@ def register_identification_tools(mcp: FastMCP) -> None:
             raise ValueError("leg_label must be 'A' or 'B'")
 
         post = _load_session(session_path)
-        db_path = post.metadata["db_path"]
-        couplet_id = post.metadata["current_couplet_id"]
+        db_path = str(post.metadata["db_path"])
+        couplet_id = str(post.metadata["current_couplet_id"])
 
         with get_connection(db_path) as conn:
             couplet_row = conn.execute(
@@ -264,9 +268,12 @@ def register_identification_tools(mcp: FastMCP) -> None:
             f"\n- **Couplet {couplet_num}** (p. {page_ref}) → **{leg_label}** "
             f"— {leg_row['text'][:120]}...\n"
             if len(leg_row["text"]) > 120
-            else f"\n- **Couplet {couplet_num}** (p. {page_ref}) → **{leg_label}** — {leg_row['text']}\n"
+            else (
+                f"\n- **Couplet {couplet_num}** (p. {page_ref}) "
+                f"→ **{leg_label}** — {leg_row['text']}\n"
+            )
         )
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         # Parse and update session body
         choices_marker = "## Choices"
@@ -310,7 +317,8 @@ def register_identification_tools(mcp: FastMCP) -> None:
 
             position_text = (
                 f"**Couplet {next_couplet['number']}** (p. {(next_couplet['page_ref'] or 0) + 1})"
-                if next_couplet else f"**Couplet (id={next_id})**"
+                if next_couplet
+                else f"**Couplet (id={next_id})**"
             )
             body = _update_current_position(body, position_text)
             post.content = body
@@ -344,8 +352,8 @@ def register_identification_tools(mcp: FastMCP) -> None:
         """
         depth = min(max(1, depth), 10)
         post = _load_session(session_path)
-        db_path = post.metadata["db_path"]
-        couplet_id = post.metadata["current_couplet_id"]
+        db_path = str(post.metadata["db_path"])
+        couplet_id = str(post.metadata["current_couplet_id"])
 
         results: dict[str, Any] = {}
         for label in ("A", "B"):
@@ -425,9 +433,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
                 "term": term,
                 "definition": None,
                 "match_type": "none" if not fts_rows else "fts_suggestions",
-                "suggestions": [
-                    {"term": r["label"], "definition": r["body"]} for r in fts_rows
-                ],
+                "suggestions": [{"term": r["label"], "definition": r["body"]} for r in fts_rows],
             }
 
     @mcp.tool(
@@ -508,7 +514,11 @@ def register_identification_tools(mcp: FastMCP) -> None:
         return {
             "query": query,
             "results": [
-                {"taxon_id": r["content_id"], "name": r["label"], "description_snippet": r["body"][:200]}
+                {
+                    "taxon_id": r["content_id"],
+                    "name": r["label"],
+                    "description_snippet": r["body"][:200],
+                }
                 for r in rows
             ],
         }
@@ -551,8 +561,7 @@ def _get_couplet_data(db_path: str, couplet_id: str) -> dict[str, Any]:
                 (leg["id"],),
             ).fetchall()
             leg_figures[leg["leg_label"]] = [
-                {"fig_id": f["figure_id"], "ref_text": f["reference_text"]}
-                for f in figs
+                {"fig_id": f["figure_id"], "ref_text": f["reference_text"]} for f in figs
             ]
 
     if couplet is None:
@@ -610,12 +619,14 @@ def _collect_terminals(
                     "SELECT name, rank FROM taxa WHERE id = ?",
                     (leg["terminal_taxon_id"],),
                 ).fetchone()
-                terminals.append({
-                    "taxon_id": leg["terminal_taxon_id"],
-                    "name": taxon["name"] if taxon else "(unknown)",
-                    "rank": taxon["rank"] if taxon else "(unknown)",
-                    "depth": cur_depth,
-                })
+                terminals.append(
+                    {
+                        "taxon_id": leg["terminal_taxon_id"],
+                        "name": taxon["name"] if taxon else "(unknown)",
+                        "rank": taxon["rank"] if taxon else "(unknown)",
+                        "depth": cur_depth,
+                    }
+                )
             elif leg["next_couplet_id"] and cur_depth < depth:
                 next_id = leg["next_couplet_id"]
                 queue.append((next_id, "A", cur_depth + 1))

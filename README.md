@@ -231,6 +231,15 @@ docs/
 
 ## Development
 
+### First-time setup
+
+After cloning, install dependencies and wire up the git hooks:
+
+```bash
+uv sync --group dev
+uv run pre-commit install
+```
+
 ### Running checks
 
 ```bash
@@ -244,19 +253,16 @@ uv run mypy src/
 # Tests with coverage
 uv run pytest
 
-# Apply license headers to all .py files
-uv run licenseheaders -t license_header.txt -d src/
-
-# Run all pre-commit hooks against every file
+# Run all pre-commit hooks against every file (useful after cloning or rebasing)
 uv run pre-commit run --all-files
 ```
 
 ### Pre-commit hooks
 
-Hooks run automatically on `git commit`:
-1. General hygiene (trailing whitespace, YAML/TOML validity, large files)
+Hooks run automatically on `git commit` once installed:
+1. General hygiene (trailing whitespace, YAML/TOML validity, large-file guard)
 2. `ruff` lint + auto-fix, then `ruff-format`
-3. License header enforcement (`license_header.txt`)
+3. License header enforcement — inserts the two-line header from `license_header.txt` into any `.py` file that is missing it; the commit is aborted so you can review and re-stage
 4. `mypy` type checking on `src/`
 
 ### Notes for contributors

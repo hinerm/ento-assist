@@ -1,3 +1,6 @@
+# Copyright 2026 The ento-assist Authors
+# SPDX-License-Identifier: MIT
+
 """Dichotomous key parser for ento-assist.
 
 Converts raw page text into a proposed key structure for human review.
@@ -20,8 +23,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional
-
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -32,24 +33,24 @@ from typing import Optional
 class ProposedLeg:
     """One side (A or B) of a proposed couplet."""
 
-    leg_label: str              # 'A' or 'B'
+    leg_label: str  # 'A' or 'B'
     text: str
-    next_couplet_number: Optional[str] = None   # raw goto ref, e.g. "4", "4a"
-    terminal_taxon_name: Optional[str] = None   # if this leg ends the key
+    next_couplet_number: str | None = None  # raw goto ref, e.g. "4", "4a"
+    terminal_taxon_name: str | None = None  # if this leg ends the key
     figure_references: list[str] = field(default_factory=list)  # e.g. ["Fig. 3b"]
-    confidence: float = 1.0     # 0.0–1.0; lower = needs careful review
+    confidence: float = 1.0  # 0.0–1.0; lower = needs careful review
 
 
 @dataclass
 class ProposedCouplet:
     """A proposed couplet parsed from source text."""
 
-    number: str                 # original label from text, e.g. "1", "1a"
-    page_ref: int               # page number (0-indexed) where this couplet appears
+    number: str  # original label from text, e.g. "1", "1a"
+    page_ref: int  # page number (0-indexed) where this couplet appears
     leg_a: ProposedLeg
     leg_b: ProposedLeg
-    confidence: float = 1.0     # overall couplet confidence (min of leg confidences)
-    raw_text: str = ""          # original text block for review display
+    confidence: float = 1.0  # overall couplet confidence (min of leg confidences)
+    raw_text: str = ""  # original text block for review display
 
 
 @dataclass
@@ -93,9 +94,7 @@ _COUPLET_NUM_PATTERN = re.compile(
 )
 
 # Figure reference patterns: "Fig. 3b", "fig. 12", "Figs. 3–5", etc.
-_FIGURE_REF_PATTERN = re.compile(
-    r"\bfig(?:s?|ure(?:s)?)[.\s]+[\d\w–\-,\s]+", re.IGNORECASE
-)
+_FIGURE_REF_PATTERN = re.compile(r"\bfig(?:s?|ure(?:s)?)[.\s]+[\d\w–\-,\s]+", re.IGNORECASE)
 
 # "goto" patterns: "...........3", "see 4a", "go to 5"
 _GOTO_PATTERN = re.compile(
@@ -107,7 +106,7 @@ _GOTO_PATTERN = re.compile(
 # Taxon terminal patterns: italicised genus+species, common family endings
 _TERMINAL_PATTERN = re.compile(
     r"\b[A-Z][a-z]+(?:\s+[a-z]+){1,3}\b"  # Genus species [subsp]
-    r"|\b\w+(?:inae|idae|ini)\b",           # subfamily/family/tribe endings
+    r"|\b\w+(?:inae|idae|ini)\b",  # subfamily/family/tribe endings
 )
 
 
@@ -238,8 +237,7 @@ def parse_key_from_texts(
     for num, entries in seen.items():
         if len(entries) < 2:
             warnings.append(
-                f"Couplet {num}: only one leg detected — may be split across pages "
-                "or misformatted."
+                f"Couplet {num}: only one leg detected — may be split across pages or misformatted."
             )
             # Create a stub with low confidence
             leg_a_text, leg_a_page = entries[0]
@@ -294,9 +292,7 @@ def parse_key_from_texts(
 
     couplets.sort(key=_sort_key)
 
-    overall_conf = (
-        sum(c.confidence for c in couplets) / len(couplets) if couplets else 0.0
-    )
+    overall_conf = sum(c.confidence for c in couplets) / len(couplets) if couplets else 0.0
 
     return ProposedKey(
         title=title or "Untitled Key",
@@ -340,14 +336,14 @@ def _extract_fig_refs(text: str) -> list[str]:
     return [m.group(0).strip() for m in _FIGURE_REF_PATTERN.finditer(text)]
 
 
-def _extract_goto(text: str) -> Optional[str]:
+def _extract_goto(text: str) -> str | None:
     m = _GOTO_PATTERN.search(text)
     if m:
         return (m.group(1) or m.group(2) or "").strip() or None
     return None
 
 
-def _extract_terminal(text: str) -> Optional[str]:
+def _extract_terminal(text: str) -> str | None:
     m = _TERMINAL_PATTERN.search(text)
     return m.group(0).strip() if m else None
 
@@ -356,12 +352,10 @@ def _looks_like_new_section(text: str) -> bool:
     """Heuristic: does this page look like it starts a new major section?"""
     # Look for all-caps headings or lines that are short and title-cased near the top
     first_500 = text[:500]
-    lines = [l.strip() for l in first_500.splitlines() if l.strip()]
+    lines = [ln.strip() for ln in first_500.splitlines() if ln.strip()]
     if not lines:
         return False
     first_line = lines[0]
-    return (
-        first_line.isupper() and len(first_line) > 4
-    ) or (
+    return (first_line.isupper() and len(first_line) > 4) or (
         first_line.istitle() and len(first_line.split()) <= 6
     )

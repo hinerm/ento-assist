@@ -1,3 +1,6 @@
+# Copyright 2026 The ento-assist Authors
+# SPDX-License-Identifier: MIT
+
 """Database connection management for ento-assist.
 
 Provides a context manager for SQLite connections and schema initialization.
@@ -7,9 +10,9 @@ All connections enforce foreign keys and WAL mode.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
 
 _SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 

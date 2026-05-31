@@ -1,3 +1,6 @@
+# Copyright 2026 The ento-assist Authors
+# SPDX-License-Identifier: MIT
+
 """FastMCP server entry point for ento-assist.
 
 Exposes ingestion and identification tools to an LLM agent via the
@@ -23,8 +26,8 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from ento_assist.tools.ingestion import register_ingestion_tools
 from ento_assist.tools.identification import register_identification_tools
+from ento_assist.tools.ingestion import register_ingestion_tools
 
 # ---------------------------------------------------------------------------
 # Human-in-the-loop workflow instructions

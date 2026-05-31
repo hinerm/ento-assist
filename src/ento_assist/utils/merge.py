@@ -1,3 +1,6 @@
+# Copyright 2026 The ento-assist Authors
+# SPDX-License-Identifier: MIT
+
 """Database merge utility for ento-assist.
 
 Merges two ento-assist SQLite databases into a single output database.
@@ -24,14 +27,11 @@ Merge order:
 from __future__ import annotations
 
 import sqlite3
-import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 
 from ento_assist.db.connection import initialize_db
-
 
 # Tables in dependency order (parent before child)
 _MERGE_ORDER = [
@@ -126,7 +126,7 @@ def _merge_table(conn: sqlite3.Connection, table: str, prefer: str) -> list[str]
     conflict_cols = _CONFLICT_CHECK_COLUMNS.get(table, [])
 
     for row in src_rows:
-        row_dict = dict(zip(columns, row))
+        row_dict = dict(zip(columns, row, strict=False))
         row_id = row_dict.get("id") or row_dict.get("leg_id") or row_dict.get("figure_id")
 
         # Check for existing row with same PK
@@ -140,7 +140,7 @@ def _merge_table(conn: sqlite3.Connection, table: str, prefer: str) -> list[str]
             if existing and conflict_cols:
                 for col in conflict_cols:
                     src_val = row_dict.get(col)
-                    dst_val = existing[col] if col in existing.keys() else None
+                    dst_val = existing.get(col)
                     if src_val != dst_val and src_val is not None and dst_val is not None:
                         warnings.append(
                             f"CONFLICT [{table}.{col}] id={row_id}: "
@@ -173,7 +173,9 @@ def _merge_table(conn: sqlite3.Connection, table: str, prefer: str) -> list[str]
 @click.command()
 @click.argument("db1", type=click.Path(exists=True, path_type=Path))
 @click.argument("db2", type=click.Path(exists=True, path_type=Path))
-@click.option("--output", "-o", required=True, type=click.Path(path_type=Path), help="Output database path")
+@click.option(
+    "--output", "-o", required=True, type=click.Path(path_type=Path), help="Output database path"
+)
 @click.option(
     "--prefer",
     type=click.Choice(["db1", "db2"], case_sensitive=False),

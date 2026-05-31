@@ -1,0 +1,2 @@
+# Copyright 2026 The ento-assist Authors
+# SPDX-License-Identifier: MIT
