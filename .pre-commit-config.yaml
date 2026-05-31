@@ -1,0 +1,55 @@
+repos:
+  # ---------------------------------------------------------------------------
+  # General file hygiene
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=5120] # warn on files > 5 MB (e.g. accidental figure blobs)
+      - id: check-merge-conflict
+      - id: debug-statements
+
+  # ---------------------------------------------------------------------------
+  # Ruff — format, lint, and import sort in one pass
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.10
+    hooks:
+      - id: ruff # lint + auto-fix
+        args: [--fix]
+      - id: ruff-format # format (replaces black)
+
+  # ---------------------------------------------------------------------------
+  # License headers
+  # Run `licenseheaders -t license_header.txt -d src/` to apply manually.
+  # Pre-commit enforces that headers are present on every commit.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.5
+    hooks:
+      - id: insert-license
+        files: \.py$
+        args:
+          - --license-filepath
+          - license_header.txt
+          - --comment-style
+          - "#"
+
+  # ---------------------------------------------------------------------------
+  # Mypy — static type checking
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - mcp[cli]>=1.2.0
+          - click>=8.1.0
+          - python-frontmatter>=1.1.0
+        args: [--config-file=pyproject.toml]
+        files: ^src/
