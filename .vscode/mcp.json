@@ -10,7 +10,7 @@
 				"ento-assist"
 			],
 			"env": {
-				"ENTO_DB_PATH": "${env:ENTO_DB_PATH}"
+				"ENTO_DB_PATH": "${userHome}/.entoassist/db.sqlite"
 			}
 		}
 	}

@@ -90,8 +90,12 @@ The server requires one environment variable:
 |---|---|
 | `ENTO_DB_PATH` | Absolute path to your SQLite database file. Created on first run if it does not exist. |
 
+For VS Code, this is preconfigured in `.vscode/mcp.json`. For other clients
+(Claude Desktop, etc.) or direct server invocations, set it in the environment
+or client config:
+
 ```bash
-export ENTO_DB_PATH=/Users/you/ichneumonoidea.sqlite
+export ENTO_DB_PATH=~/.entoassist/db.sqlite
 ```
 
 ---
@@ -99,7 +103,7 @@ export ENTO_DB_PATH=/Users/you/ichneumonoidea.sqlite
 ## Running the server
 
 ```bash
-export ENTO_DB_PATH=/path/to/ento.sqlite
+export ENTO_DB_PATH=~/.entoassist/db.sqlite
 uv run ento-assist
 ```
 
@@ -115,19 +119,15 @@ ento-assist works with any client that supports the MCP stdio transport.
 ### VS Code (GitHub Copilot)
 
 The repository includes `.vscode/mcp.json` which registers the server
-automatically. Set `ENTO_DB_PATH` in your shell before launching VS Code from
-that shell:
-
-```bash
-export ENTO_DB_PATH=/path/to/ento.sqlite
-code /path/to/ento-assist
-```
+automatically. It is preconfigured to use `~/.entoassist/db.sqlite` as the
+database path (created on first run if it does not exist). To use a different
+location, edit the `ENTO_DB_PATH` value in `.vscode/mcp.json` directly.
 
 The server will appear in the MCP servers list and start on demand.
 
 ### Claude Desktop
 
-Add an entry to your `claude_desktop_config.json`:
+Add an entry to your `claude_desktop_config.json`, with `ENTO_DB_PATH` edited as needed:
 
 ```json
 {
@@ -135,7 +135,7 @@ Add an entry to your `claude_desktop_config.json`:
     "ento-assist": {
       "command": "uv",
       "args": ["--directory", "/path/to/ento-assist", "run", "ento-assist"],
-      "env": { "ENTO_DB_PATH": "/path/to/ento.sqlite" }
+      "env": { "ENTO_DB_PATH": "/Users/you/.entoassist/db.sqlite" }
     }
   }
 }
