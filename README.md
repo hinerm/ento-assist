@@ -1,10 +1,10 @@
 # ento-assist
 
-An LLM-assisted entomological specimen identification system built as a
+An LLM-assisted entomological specimen identification system, delivered as a
 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server.
 
-The server connects a Copilot agent to a structured SQLite knowledge base
-built from printed PDF identification keys (dichotomous keys). The agent
+The server exposes a structured SQLite knowledge base built from printed PDF
+identification keys (dichotomous keys) to any MCP-capable agent. The agent
 guides a user who has a physical specimen in hand through couplet-by-couplet
 identification, looking up morphological terms, displaying key figures, and
 confirming terminal taxon descriptions — always with the human making every
@@ -22,7 +22,7 @@ general-purpose and works for any group covered by a dichotomous key.
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Running the server](#running-the-server)
-- [VS Code / Copilot setup](#vs-code--copilot-setup)
+- [Connecting an MCP client](#connecting-an-mcp-client)
 - [Workflow overview](#workflow-overview)
   - [Ingestion](#ingestion-mode-building-the-knowledge-base)
   - [Identification](#identification-mode-identifying-a-specimen)
@@ -58,6 +58,7 @@ general-purpose and works for any group covered by a dichotomous key.
 - **Python ≥ 3.11**
 - **[uv](https://docs.astral.sh/uv/)** package manager
 - A PDF of a dichotomous key, or an existing `.sqlite` database
+- Any MCP-capable agent (see [Connecting an MCP client](#connecting-an-mcp-client))
 
 For OCR on scanned PDFs:
 - A CUDA-capable GPU is recommended (surya-ocr falls back to CPU but is slow).
@@ -107,18 +108,44 @@ server; launch it via an MCP client (VS Code, Claude Desktop, etc.).
 
 ---
 
-## VS Code / Copilot setup
+## Connecting an MCP client
 
-The repository includes a `.vscode/mcp.json` that registers the server with
-VS Code's built-in MCP client. Before opening VS Code, set `ENTO_DB_PATH` in
-your shell environment, then launch VS Code from that shell:
+ento-assist works with any client that supports the MCP stdio transport.
+
+### VS Code (GitHub Copilot)
+
+The repository includes `.vscode/mcp.json` which registers the server
+automatically. Set `ENTO_DB_PATH` in your shell before launching VS Code from
+that shell:
 
 ```bash
 export ENTO_DB_PATH=/path/to/ento.sqlite
 code /path/to/ento-assist
 ```
 
-The server starts automatically when you open a Copilot chat in agent mode.
+The server will appear in the MCP servers list and start on demand.
+
+### Claude Desktop
+
+Add an entry to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ento-assist": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/ento-assist", "run", "ento-assist"],
+      "env": { "ENTO_DB_PATH": "/path/to/ento.sqlite" }
+    }
+  }
+}
+```
+
+### Other clients
+
+Any client that launches a stdio MCP server can use the same pattern:
+command `uv`, args `["--directory", "<repo>", "run", "ento-assist"]`,
+with `ENTO_DB_PATH` set in the environment.
 
 ---
 
@@ -275,8 +302,8 @@ Hooks run automatically on `git commit` once installed:
   couplet needs manual review before committing — do not raise this threshold
   without a corresponding improvement to the parser heuristics.
 - The `SERVER_INSTRUCTIONS` string in `server.py` encodes mandatory
-  human-in-the-loop workflow rules that are sent to the LLM on every session
-  start. Do not weaken these rules.
+  human-in-the-loop workflow rules sent to the agent on every session start
+  via the MCP `initialize` response. Do not weaken these rules.
 
 ---
 
