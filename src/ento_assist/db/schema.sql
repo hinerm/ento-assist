@@ -39,17 +39,21 @@ CREATE INDEX IF NOT EXISTS idx_taxa_parent ON taxa(parent_id);
 -- ---------------------------------------------------------------------------
 -- Identification keys
 -- A single dichotomous key, scoped to identifying within a taxon.
--- start_couplet_id is set after couplets are committed.
+-- base_taxon_id: the taxon the key operates on (e.g. Ichneumonidae at family rank).
+-- leaf_taxon_rank: the rank the terminals resolve to (e.g. 'subfamily').
+-- title is auto-generated as "<base_taxon_name> → <leaf_taxon_rank>".
+-- start_couplet_id is set by build_finalize_key after all couplets are added.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS identification_keys (
     id               TEXT PRIMARY KEY,  -- UUID
     doc_id           TEXT NOT NULL REFERENCES documents(id),
     title            TEXT NOT NULL,
-    scope_taxon_id   TEXT REFERENCES taxa(id),
-    start_couplet_id TEXT  -- FK set after commit; references couplets(id)
+    base_taxon_id    TEXT NOT NULL REFERENCES taxa(id),
+    leaf_taxon_rank  TEXT NOT NULL,     -- e.g. 'subfamily', 'genus', 'species'
+    start_couplet_id TEXT               -- FK set by build_finalize_key; references couplets(id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_keys_scope ON identification_keys(scope_taxon_id);
+CREATE INDEX IF NOT EXISTS idx_keys_base_taxon ON identification_keys(base_taxon_id);
 
 -- ---------------------------------------------------------------------------
 -- Couplets
@@ -67,16 +71,19 @@ CREATE INDEX IF NOT EXISTS idx_couplets_key ON couplets(key_id);
 -- ---------------------------------------------------------------------------
 -- Couplet legs
 -- Each couplet has two legs (leg_label = 'A' or 'B').
+-- next_couplet_number: the original source goto number (e.g. "4"); permanent audit trail.
+-- next_couplet_id: resolved UUID FK, set by build_finalize_key. NULL until then.
 -- Exactly one of next_couplet_id or terminal_taxon_id should be non-null
 -- for a complete, validated key (both null = unresolved / needs review).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS couplet_legs (
-    id                TEXT PRIMARY KEY,  -- UUID
-    couplet_id        TEXT NOT NULL REFERENCES couplets(id),
-    leg_label         TEXT NOT NULL CHECK (leg_label IN ('A', 'B')),
-    text              TEXT NOT NULL,
-    next_couplet_id   TEXT REFERENCES couplets(id),
-    terminal_taxon_id TEXT REFERENCES taxa(id)
+    id                  TEXT PRIMARY KEY,  -- UUID
+    couplet_id          TEXT NOT NULL REFERENCES couplets(id),
+    leg_label           TEXT NOT NULL CHECK (leg_label IN ('A', 'B')),
+    text                TEXT NOT NULL,
+    next_couplet_number TEXT,              -- original source number; never cleared
+    next_couplet_id     TEXT REFERENCES couplets(id),
+    terminal_taxon_id   TEXT REFERENCES taxa(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_legs_couplet ON couplet_legs(couplet_id);
@@ -114,13 +121,12 @@ CREATE TABLE IF NOT EXISTS couplet_leg_figures (
 -- ---------------------------------------------------------------------------
 -- Glossary terms
 -- Morphological and anatomical term definitions.
+-- Global — not tied to any document.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS glossary_terms (
     id         TEXT PRIMARY KEY,  -- UUID
     term       TEXT NOT NULL,
-    definition TEXT NOT NULL,
-    doc_id     TEXT REFERENCES documents(id),
-    page_ref   INTEGER
+    definition TEXT NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_glossary_term ON glossary_terms(term);

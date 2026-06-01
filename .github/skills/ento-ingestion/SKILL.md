@@ -2,10 +2,195 @@
 name: ento-ingestion
 description: "Use when: ingesting a PDF dichotomous key into the ento-assist database,
   encoding couplets from a printed key, registering a new document, scanning key structure,
-  submitting key extraction, previewing or correcting parsed couplets, committing key data,
-  adding figures, glossary terms, or taxon descriptions to the entomology database."
+  adding couplets one at a time, finalizing a key, adding figures, glossary terms, or
+  taxon descriptions to the entomology database."
 argument-hint: "PDF path and title, e.g. /books/Townes1969.pdf 'Townes 1969 Ichneumonidae vol 1'"
 ---
+
+# Ento-Assist Ingestion Workflow
+
+Guides the agent through encoding a printed dichotomous key from a PDF into the ento-assist
+database. Every couplet is processed interactively — one at a time — with user confirmation
+before it is written to the database.
+
+**This workflow is always human-supervised. Each couplet is confirmed before committing.**
+
+---
+
+## Step 1 — Register the document
+
+Call `build_register_document(path, title)`.
+
+Report the returned `doc_id` and confirm registration.
+
+---
+
+## Step 2 — Scan for key regions
+
+Call `build_scan_document(doc_id)`. Present the full list of detected regions
+(page ranges, titles) to the user.
+
+Ask:
+> "Do these page boundaries look correct? Should any ranges be adjusted or excluded?"
+
+**Wait for confirmation before proceeding.**
+
+---
+
+## Step 3 — Ask about couplet format and key identity
+
+Ask the user:
+
+> 1. How are couplets numbered in this key? (e.g. paired "1."/"1." lines,
+>    lettered "1a."/"1b.", "A."/"B." bullets, or another format)
+> 2. What is the base taxon this key covers? (scientific name + rank,
+>    e.g. "Ichneumonidae" / "family")
+> 3. What rank do the terminal leads identify to? (e.g. "subfamily", "genus")
+
+Do not proceed until you have answers to all three questions.
+
+---
+
+## Step 4 — Create the key record
+
+Call `build_create_key(doc_id, base_taxon_name, base_taxon_rank, leaf_taxon_rank)`.
+
+The key title is auto-generated as `"<base_taxon_name> → <leaf_taxon_rank>"`.
+Report the `key_id` and title to the user and confirm.
+
+---
+
+## Step 5 — Couplet loop (repeat for EVERY couplet, in source order)
+
+Process **exactly one couplet per iteration**. Do not move to the next couplet
+until the current one is confirmed and committed.
+
+### 5a — Read the page
+
+Call `build_get_page_text(doc_id, page_num)` for the page containing this couplet.
+If the page is image-only, call `build_ocr_page(doc_id, page_num)` instead.
+
+### 5b — Parse and present
+
+Read the text and identify the single next couplet. Present your interpretation:
+
+```
+Couplet [N]:
+  Leg A: [full condition text] → goto [M]  OR  terminal: [Taxon name]
+  Leg B: [full condition text] → goto [P]  OR  terminal: [Taxon name]
+```
+
+Each leg must have **either** a goto (couplet number) **or** a terminal (taxon name),
+never both.
+
+### 5c — Confirm with user
+
+Ask:
+> "Does this look correct? (yes / describe what needs changing)"
+
+**WAIT for the user's reply.** Apply any corrections, re-present, and re-confirm.
+Do NOT proceed until the user explicitly says the interpretation is correct.
+
+### 5d — Figures
+
+Ask:
+> "Is there an illustration on this page associated with this couplet?"
+
+If YES:
+1. Call `build_get_page_image(doc_id, page_num)` to display the page to the user.
+2. Ask for the bounding box: `"Please give me x0, y0, x1, y1 coordinates for the figure."`
+3. Call `build_crop_figure(doc_id, page_num, x0, y0, x1, y1, caption)`.
+   Hold the returned `fig_id` — you will link it after committing the couplet.
+
+Do NOT call `build_link_figure` yet (you need `leg_a_id`/`leg_b_id` from step 5f first).
+
+### 5e — Glossary check
+
+For each technical morphological term in leg A or leg B text that may be
+unfamiliar to a student, ask:
+> "Do you have a definition for '<term>'?"
+
+If the user provides one, call `build_add_term(term, definition)`.
+
+### 5f — Commit the couplet
+
+Call `build_add_couplet` with the confirmed interpretation:
+
+```
+build_add_couplet(
+    key_id=...,
+    number="N",
+    page_ref=...,
+    leg_a_text="...",
+    leg_b_text="...",
+    leg_a_goto="M",      # or None
+    leg_a_terminal=None, # or "Taxon name"
+    leg_b_goto="P",      # or None
+    leg_b_terminal=None, # or "Taxon name"
+)
+```
+
+If a figure was captured in step 5d, call `build_link_figure(fig_id, leg_id, ref_text)`
+using the `leg_a_id` or `leg_b_id` returned above.
+
+### 5g — Advance
+
+Confirm: `"Couplet [N] committed."` then move immediately to the next couplet
+(return to step 5a).
+
+---
+
+## Step 6 — Finalize the key
+
+After the **last** couplet is committed, call `build_finalize_key(key_id)`.
+
+This resolves all forward-reference numbers to UUIDs and sets `start_couplet_id`.
+
+If any unresolved gotos are reported, show them to the user:
+> "The following goto references couldn't be matched: [list]. Would you like to
+> add the missing couplets or leave them as stubs?"
+
+---
+
+## Step 7 — Taxon descriptions (optional, recommended)
+
+For each terminal taxon, if the source document contains a diagnosis or description,
+call `build_add_taxon(taxon_name, rank, description, doc_id, page_ref)`.
+
+These descriptions are shown to users when they reach a terminal during identification.
+
+---
+
+## Tool Reference
+
+| Tool | When to use |
+|------|-------------|
+| `build_register_document` | Step 1 — register a PDF |
+| `build_scan_document` | Step 2 — detect key regions |
+| `build_get_page_text` | Step 5a — read a page's text layer |
+| `build_ocr_page` | Step 5a — OCR fallback for image-only pages |
+| `build_get_page_image` | Step 5d — display a page for figure inspection |
+| `build_create_key` | Step 4 — create the key record |
+| `build_add_couplet` | Step 5f — commit one confirmed couplet |
+| `build_finalize_key` | Step 6 — resolve forward refs, set start couplet |
+| `build_crop_figure` | Step 5d — crop and store a figure |
+| `build_link_figure` | Step 5f — associate a figure with a couplet leg |
+| `build_add_term` | Step 5e — add a glossary term |
+| `build_add_taxon` | Step 7 — add/update a taxon description |
+
+---
+
+## Common Issues
+
+| Problem | Approach |
+|---------|----------|
+| Image-only pages | Call `build_ocr_page` instead of `build_get_page_text` |
+| Non-standard couplet numbering | Ask the user in Step 3; adjust parsing accordingly |
+| Couplet spans two pages | Read both pages before presenting interpretation |
+| A leg has neither goto nor terminal | `build_add_couplet` will warn; ask user for the missing value |
+| Server restart mid-ingestion | Couplets already committed are safe in the DB; resume from the last uncommitted couplet |
+| Unresolved goto after finalization | Ask user whether to add missing couplets or treat as stubs |
+
 
 # Ento-Assist Ingestion Workflow
 

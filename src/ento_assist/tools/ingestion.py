@@ -4,11 +4,14 @@
 """Ingestion MCP tools for ento-assist.
 
 These tools are exposed to the LLM during document ingestion sessions.
-They implement the extract → review → correct → commit workflow.
+They implement a couplet-by-couplet interactive workflow:
 
-Pending extractions are held in an in-memory store keyed by extraction_id.
-They are intentionally NOT persisted — if the server restarts mid-ingestion,
-the extraction must be re-run (which is fast and deterministic).
+  build_register_document  → build_scan_document
+  → build_create_key
+  → build_add_couplet  (repeated, one couplet at a time with user confirmation)
+  → build_finalize_key
+
+Figure capture and glossary/taxon additions can be interleaved at any point.
 """
 
 from __future__ import annotations
@@ -16,17 +19,12 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from mcp.server.fastmcp import FastMCP, Image
 
 from ento_assist.db.connection import get_connection, initialize_db
-from ento_assist.extraction.key_parser import (
-    ProposedCouplet,
-    ProposedKey,
-    ProposedLeg,
-    scan_for_key_boundaries,
-)
+from ento_assist.extraction.key_parser import scan_for_key_boundaries
 from ento_assist.extraction.ocr import is_image_only, run_ocr
 from ento_assist.extraction.pdf import (
     BBox,
@@ -36,10 +34,6 @@ from ento_assist.extraction.pdf import (
     register_document,
     render_page_image,
 )
-
-# In-memory store for pending (not-yet-committed) extractions
-# { extraction_id: {"doc_id": ..., "db_path": ..., "proposed_key": ProposedKey} }
-_pending_extractions: dict[str, dict[str, Any]] = {}
 
 
 def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
@@ -83,9 +77,9 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
 
     @mcp.tool(
         description=(
-            "Scan all pages of a document to produce a table of contents: detected keys, "
-            "page ranges, and section headings. Present results to the user for confirmation "
-            "before calling build_propose_key on any region."
+            "Scan all pages of a document to detect likely key regions and page ranges. "
+            "Present the results to the user for confirmation and correction before proceeding. "
+            "Page boundaries are estimates — the user must confirm or adjust them."
         )
     )
     def build_scan_document(doc_id: str) -> dict[str, Any]:
@@ -117,7 +111,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             ],
             "message": (
                 "Review the detected regions with the user. Confirm or correct page "
-                "boundaries before calling build_propose_key."
+                "boundaries before calling build_create_key."
             ),
         }
 
@@ -128,8 +122,8 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
     @mcp.tool(
         description=(
             "Return the text content of a single page for the LLM to read and parse. "
-            "Pages are 1-indexed for consistency with printed page numbers shown to the user. "
-            "If the result starts with [IMAGE-ONLY], call build_ocr_page instead."
+            "Pages are 1-indexed. If the result starts with [IMAGE-ONLY], "
+            "call build_ocr_page instead."
         )
     )
     def build_get_page_text(doc_id: str, page_num: int) -> dict[str, Any]:
@@ -139,7 +133,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             doc_id: Document UUID.
             page_num: 1-indexed page number.
         """
-        idx = page_num - 1  # convert to 0-indexed
+        idx = page_num - 1
         text = get_page_text(db_path, doc_id, idx)
         image_only = is_image_only(db_path, doc_id, idx)
         return {
@@ -172,7 +166,7 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
             "Render a page as an image for display to the user. "
             "The LLM should NOT attempt to analyze this image — it is for the human operator. "
             "Use this when the user needs to visually inspect a page to identify inline figures "
-            "or verify couplet text."
+            "or verify couplet text. Use dpi=300 for detailed figure inspection."
         )
     )
     def build_get_page_image(doc_id: str, page_num: int, dpi: int = 150) -> Image:
@@ -188,386 +182,295 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         return Image(data=png_bytes, format="png")
 
     # ------------------------------------------------------------------
-    # Key structure extraction
+    # Key creation
     # ------------------------------------------------------------------
 
     @mcp.tool(
         description=(
-            "Fetch the raw text of a page range and store it as a pending extraction. "
-            "Returns the page text directly so the LLM can read and interpret it. "
-            "PRECONDITION: build_scan_document has been reviewed and page boundaries "
-            "confirmed with the user. After reading the text and discussing couplet format "
-            "with the user, call build_submit_key with your interpretation."
+            "Create a new identification key record in the database. "
+            "Call this after confirming page boundaries with the user and "
+            "before starting the couplet-by-couplet loop. "
+            "base_taxon_name is the taxon the key operates on (e.g. 'Ichneumonidae'). "
+            "base_taxon_rank is its rank (e.g. 'family'). "
+            "leaf_taxon_rank is the rank the terminals resolve to (e.g. 'subfamily'). "
+            "The key title is auto-generated as '<base_taxon_name> → <leaf_taxon_rank>'. "
+            "Returns key_id to use in subsequent build_add_couplet calls."
         )
     )
-    def build_propose_key(
+    def build_create_key(
         doc_id: str,
-        page_start: int,
-        page_end: int,
-        title: str = "",
-    ) -> dict[str, Any]:
-        """Fetch raw page text for a key region.
+        base_taxon_name: str,
+        base_taxon_rank: str,
+        leaf_taxon_rank: str,
+    ) -> dict[str, str]:
+        """Create an identification key record.
 
         Args:
-            doc_id: Document UUID.
-            page_start: First page of the key (1-indexed).
-            page_end: Last page of the key (1-indexed).
-            title: Key title (e.g. "Key to Subfamilies of Ichneumonidae").
+            doc_id: UUID of the source document.
+            base_taxon_name: Scientific name of the taxon the key covers
+                             (e.g. 'Ichneumonidae').
+            base_taxon_rank: Taxonomic rank of the base taxon
+                             (e.g. 'family', 'superfamily').
+            leaf_taxon_rank: Rank that terminal couplet legs resolve to
+                             (e.g. 'subfamily', 'genus', 'species').
         """
-        start_idx = page_start - 1
-        end_idx = page_end - 1
-
-        raw_pages: list[tuple[int, str]] = []
-        for i in range(start_idx, end_idx + 1):
-            text = get_page_text(db_path, doc_id, i)
-            if is_image_only(db_path, doc_id, i):
-                text = run_ocr(db_path, doc_id, i)
-            raw_pages.append((i, text))
-
-        extraction_id = str(uuid.uuid4())
-        _pending_extractions[extraction_id] = {
-            "doc_id": doc_id,
-            "db_path": str(db_path),
-            "title": title,
-            "page_start": start_idx,
-            "page_end": end_idx,
-            "raw_pages": raw_pages,
-            "proposed_key": None,
-        }
-
-        return {
-            "extraction_id": extraction_id,
-            "title": title or "(no title set)",
-            "pages": [{"page_num": pn + 1, "text": text} for pn, text in raw_pages],
-            "message": (
-                f"Read the page text above and discuss the couplet format with the user. "
-                f"Then call build_submit_key('{extraction_id}', couplets=[...]) "
-                f"with your interpretation."
-            ),
-        }
-
-    @mcp.tool(
-        description=(
-            "Submit the LLM's interpretation of a key's couplet structure for user review. "
-            "Call this after reading the page text from build_propose_key and discussing "
-            "the couplet numbering format with the user. Each couplet needs a number and "
-            "two legs (A and B); each leg must have text plus either a goto couplet number "
-            "or a terminal taxon name (not both). After submitting, call build_preview_extraction "
-            "and show the result to the user for approval."
-        )
-    )
-    def build_submit_key(
-        extraction_id: str,
-        couplets: list[dict[str, Any]],
-        title: str = "",
-    ) -> dict[str, Any]:
-        """Submit a structured key interpretation for user review.
-
-        Args:
-            extraction_id: UUID returned by build_propose_key.
-            couplets: List of couplet dicts. Each must have:
-                - "number": str  (e.g. "1", "1a")
-                - "page": int    (1-indexed)
-                - "leg_a": dict with "text" (str), "goto" (str|null),
-                           "terminal" (str|null), "figures" (list[str])
-                - "leg_b": dict with the same fields as leg_a
-            title: Optional key title; overrides the title from build_propose_key.
-
-        Example couplet::
-
-            {
-                "number": "1",
-                "page": 5,
-                "leg_a": {"text": "Legs III black", "goto": "2",
-                           "terminal": null, "figures": []},
-                "leg_b": {"text": "Legs III red", "goto": null,
-                           "terminal": "Genus species", "figures": []}
-            }
-        """
-        entry = _pending_extractions.get(extraction_id)
-        if entry is None:
-            raise ValueError(f"No pending extraction with id={extraction_id}")
-
-        resolved_title = title or entry.get("title") or "Untitled Key"
-        page_start = entry["page_start"]
-        page_end = entry["page_end"]
-
-        proposed_couplets = []
-        for c in couplets:
-            page_0idx = int(c.get("page", page_start + 1)) - 1
-            leg_a_data = c.get("leg_a", {})
-            leg_b_data = c.get("leg_b", {})
-
-            leg_a = ProposedLeg(
-                leg_label="A",
-                text=str(leg_a_data.get("text", "")),
-                next_couplet_number=leg_a_data.get("goto") or None,
-                terminal_taxon_name=leg_a_data.get("terminal") or None,
-                figure_references=list(leg_a_data.get("figures", [])),
-                confidence=1.0,
-            )
-            leg_b = ProposedLeg(
-                leg_label="B",
-                text=str(leg_b_data.get("text", "")),
-                next_couplet_number=leg_b_data.get("goto") or None,
-                terminal_taxon_name=leg_b_data.get("terminal") or None,
-                figure_references=list(leg_b_data.get("figures", [])),
-                confidence=1.0,
-            )
-            proposed_couplets.append(
-                ProposedCouplet(
-                    number=str(c.get("number", "")),
-                    page_ref=page_0idx,
-                    leg_a=leg_a,
-                    leg_b=leg_b,
-                    confidence=1.0,
-                    raw_text=f"{leg_a.text}\n{leg_b.text}",
-                )
-            )
-
-        entry["proposed_key"] = ProposedKey(
-            title=resolved_title,
-            page_start=page_start,
-            page_end=page_end,
-            couplets=proposed_couplets,
-            warnings=[],
-            confidence=1.0,
-        )
-
-        return {
-            "extraction_id": extraction_id,
-            "title": resolved_title,
-            "couplet_count": len(proposed_couplets),
-            "message": (
-                f"Structure submitted with {len(proposed_couplets)} couplets. "
-                f"Call build_preview_extraction('{extraction_id}') to review, "
-                f"then build_commit_extraction when approved."
-            ),
-        }
-
-    @mcp.tool(
-        description=(
-            "Return a human-readable preview of a pending extraction for spot-checking. "
-            "Show the couplets and page references to the user. "
-            "Low-confidence couplets (< 0.7) should be highlighted for careful review. "
-            "Call build_correct_extraction if corrections are needed, then build_commit_extraction."
-        )
-    )
-    def build_preview_extraction(extraction_id: str) -> dict[str, Any]:
-        """Get a reviewable preview of a pending extraction.
-
-        Args:
-            extraction_id: UUID returned by build_propose_key.
-        """
-        entry = _pending_extractions.get(extraction_id)
-        if entry is None:
-            raise ValueError(f"No pending extraction with id={extraction_id}")
-
-        proposed: ProposedKey | None = entry.get("proposed_key")
-        if proposed is None:
-            return {
-                "extraction_id": extraction_id,
-                "title": entry.get("title") or "(no title)",
-                "status": "awaiting_structure",
-                "pages": [
-                    {"page_num": pn + 1, "text": text} for pn, text in entry.get("raw_pages", [])
-                ],
-                "message": "No structure submitted yet. Call build_submit_key first.",
-            }
-
-        couplet_previews = []
-        for c in proposed.couplets:
-            couplet_previews.append(
-                {
-                    "number": c.number,
-                    "page": c.page_ref + 1,  # 1-indexed
-                    "confidence": round(c.confidence, 2),
-                    "leg_A": {
-                        "text": c.leg_a.text[:200],
-                        "goto": c.leg_a.next_couplet_number,
-                        "terminal": c.leg_a.terminal_taxon_name,
-                        "figures": c.leg_a.figure_references,
-                        "confidence": round(c.leg_a.confidence, 2),
-                    },
-                    "leg_B": {
-                        "text": c.leg_b.text[:200],
-                        "goto": c.leg_b.next_couplet_number,
-                        "terminal": c.leg_b.terminal_taxon_name,
-                        "figures": c.leg_b.figure_references,
-                        "confidence": round(c.leg_b.confidence, 2),
-                    },
-                }
-            )
-        return {
-            "extraction_id": extraction_id,
-            "title": proposed.title,
-            "page_start": proposed.page_start + 1,
-            "page_end": proposed.page_end + 1,
-            "warnings": proposed.warnings,
-            "couplets": couplet_previews,
-        }
-
-    @mcp.tool(
-        description=(
-            "Apply corrections to a pending extraction before committing. "
-            "Each correction specifies a couplet number and the field to fix. "
-            "Can be called multiple times before build_commit_extraction."
-        )
-    )
-    def build_correct_extraction(
-        extraction_id: str,
-        corrections: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        """Apply corrections to a pending extraction.
-
-        Args:
-            extraction_id: UUID returned by build_propose_key.
-            corrections: List of correction dicts. Each must have:
-                - "couplet_number": str (e.g. "3")
-                - "leg": "A" or "B"
-                - "field": one of "text", "goto", "terminal", "figures"
-                - "value": new value (str, or list[str] for figures)
-
-        Example:
-            [{"couplet_number": "3", "leg": "A", "field": "goto", "value": "5"}]
-        """
-        entry = _pending_extractions.get(extraction_id)
-        if entry is None:
-            raise ValueError(f"No pending extraction with id={extraction_id}")
-
-        proposed: ProposedKey | None = entry.get("proposed_key")
-        if proposed is None:
-            raise ValueError(
-                f"Extraction {extraction_id} has no submitted structure. "
-                "Call build_submit_key first."
-            )
-
-        applied = []
-        errors = []
-
-        couplet_map = {c.number: c for c in proposed.couplets}
-
-        for corr in corrections:
-            num = str(corr.get("couplet_number", ""))
-            leg_label = str(corr.get("leg", "")).upper()
-            field = str(corr.get("field", ""))
-            value = corr.get("value")
-
-            couplet = couplet_map.get(num)
-            if couplet is None:
-                errors.append(f"Couplet {num} not found.")
-                continue
-
-            leg = couplet.leg_a if leg_label == "A" else couplet.leg_b
-            if field == "text":
-                leg.text = str(value)
-                leg.confidence = 1.0
-            elif field == "goto":
-                leg.next_couplet_number = str(value) if value else None
-                leg.terminal_taxon_name = None
-                leg.confidence = 1.0
-            elif field == "terminal":
-                leg.terminal_taxon_name = str(value) if value else None
-                leg.next_couplet_number = None
-                leg.confidence = 1.0
-            elif field == "figures":
-                leg.figure_references = list(value) if value else []
-            else:
-                errors.append(f"Unknown field '{field}' for couplet {num} leg {leg_label}.")
-                continue
-
-            applied.append(f"Couplet {num} leg {leg_label}.{field} updated.")
-
-        return {"applied": applied, "errors": errors}
-
-    @mcp.tool(
-        description=(
-            "Commit a reviewed and corrected extraction to the database. "
-            "PRECONDITION: build_preview_extraction has been shown to the user and they "
-            "have explicitly approved the extraction. Do NOT call this without user approval. "
-            "Returns the key_id and a summary of committed couplets."
-        )
-    )
-    def build_commit_extraction(extraction_id: str) -> dict[str, Any]:
-        """Write a validated couplet graph to the database.
-
-        Args:
-            extraction_id: UUID returned by build_propose_key.
-        """
-        entry = _pending_extractions.get(extraction_id)
-        if entry is None:
-            raise ValueError(f"No pending extraction with id={extraction_id}")
-
-        proposed: ProposedKey | None = entry.get("proposed_key")
-        if proposed is None:
-            raise ValueError(
-                f"Extraction {extraction_id} has no submitted structure. "
-                "Call build_submit_key first."
-            )
-
-        doc_id: str = entry["doc_id"]
-
-        key_id = str(uuid.uuid4())
-        couplet_id_map: dict[str, str] = {}  # number → UUID
-        leg_id_map: dict[tuple[str, str], str] = {}  # (couplet_num, leg_label) → UUID
-
-        # First pass: assign UUIDs to all couplets and legs
-        for c in proposed.couplets:
-            couplet_id_map[c.number] = str(uuid.uuid4())
-            leg_id_map[(c.number, "A")] = str(uuid.uuid4())
-            leg_id_map[(c.number, "B")] = str(uuid.uuid4())
-
+        # Look up or create the base taxon
         with get_connection(db_path) as conn:
-            # Insert identification key (start_couplet_id set after)
-            start_num = proposed.couplets[0].number if proposed.couplets else None
+            row = conn.execute(
+                "SELECT id FROM taxa WHERE name = ? AND rank = ? LIMIT 1",
+                (base_taxon_name, base_taxon_rank),
+            ).fetchone()
+            if row:
+                taxon_id = cast(str, row["id"])
+            else:
+                taxon_id = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO taxa (id, name, rank, parent_id, description, doc_id, page_ref) "
+                    "VALUES (?, ?, ?, NULL, NULL, ?, NULL)",
+                    (taxon_id, base_taxon_name, base_taxon_rank, doc_id),
+                )
+
+            title = f"{base_taxon_name} → {leaf_taxon_rank}"
+            key_id = str(uuid.uuid4())
             conn.execute(
                 "INSERT INTO identification_keys "
-                "(id, doc_id, title, scope_taxon_id, start_couplet_id) "
-                "VALUES (?, ?, ?, NULL, ?)",
-                (
-                    key_id,
-                    doc_id,
-                    proposed.title,
-                    couplet_id_map.get(start_num) if start_num else None,
-                ),
+                "(id, doc_id, title, base_taxon_id, leaf_taxon_rank, start_couplet_id) "
+                "VALUES (?, ?, ?, ?, ?, NULL)",
+                (key_id, doc_id, title, taxon_id, leaf_taxon_rank),
             )
-
-            # Pass 1: insert all couplets first so forward next_couplet_id refs resolve
-            for c in proposed.couplets:
-                conn.execute(
-                    "INSERT INTO couplets (id, key_id, number, page_ref) VALUES (?, ?, ?, ?)",
-                    (couplet_id_map[c.number], key_id, c.number, c.page_ref),
-                )
-
-            # Pass 2: insert all legs now that all couplet IDs exist
-            for c in proposed.couplets:
-                couplet_db_id = couplet_id_map[c.number]
-                for leg, label in [(c.leg_a, "A"), (c.leg_b, "B")]:
-                    leg_db_id = leg_id_map[(c.number, label)]
-                    next_couplet_db_id = (
-                        couplet_id_map.get(leg.next_couplet_number)
-                        if leg.next_couplet_number
-                        else None
-                    )
-                    conn.execute(
-                        "INSERT INTO couplet_legs "
-                        "(id, couplet_id, leg_label, text, next_couplet_id, terminal_taxon_id) "
-                        "VALUES (?, ?, ?, ?, ?, NULL)",
-                        (leg_db_id, couplet_db_id, label, leg.text, next_couplet_db_id),
-                    )
-
-        del _pending_extractions[extraction_id]
 
         return {
             "key_id": key_id,
-            "title": proposed.title,
-            "couplets_committed": len(proposed.couplets),
+            "title": title,
             "message": (
-                f"Key '{proposed.title}' committed with {len(proposed.couplets)} couplets. "
-                f"key_id={key_id}. "
-                "You can now call build_crop_figure/build_link_figure or build_add_taxon."
+                f"Key '{title}' created (key_id={key_id}). "
+                "Now call build_add_couplet for each couplet, one at a time, "
+                "with user confirmation after each. "
+                "Call build_finalize_key when all couplets are added."
             ),
         }
+
+    # ------------------------------------------------------------------
+    # Couplet ingestion (incremental)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Add a single couplet (with both legs) to an existing key. "
+            "Call this ONCE PER COUPLET, only after the user has confirmed the "
+            "interpretation is correct. "
+            "Each leg must have either a goto (next couplet number as a string, e.g. '4') "
+            "or a terminal (taxon name string), but NOT both. "
+            "leg_x_goto and leg_x_terminal are both optional (pass null/None if not applicable). "
+            "If a leg has neither, it is stored as unresolved — a warning is returned. "
+            "Returns couplet_id, leg_a_id, and leg_b_id for use with build_link_figure."
+        )
+    )
+    def build_add_couplet(
+        key_id: str,
+        number: str,
+        page_ref: int,
+        leg_a_text: str,
+        leg_b_text: str,
+        leg_a_goto: str | None = None,
+        leg_a_terminal: str | None = None,
+        leg_b_goto: str | None = None,
+        leg_b_terminal: str | None = None,
+    ) -> dict[str, Any]:
+        """Add a single confirmed couplet to the database.
+
+        Args:
+            key_id: UUID of the identification key.
+            number: Couplet number/label as it appears in the source (e.g. '1', '1a').
+            page_ref: 1-indexed page number where this couplet appears.
+            leg_a_text: Full text of leg A (the first / affirmative condition).
+            leg_b_text: Full text of leg B (the second / negative condition).
+            leg_a_goto: Couplet number leg A leads to (e.g. '4'), or None.
+            leg_a_terminal: Taxon name leg A identifies (e.g. 'Ophioninae'), or None.
+            leg_b_goto: Couplet number leg B leads to, or None.
+            leg_b_terminal: Taxon name leg B identifies, or None.
+        """
+        warnings: list[str] = []
+
+        def _resolve_terminal(name: str) -> str:
+            """Look up or create a taxon stub and return its UUID."""
+            with get_connection(db_path) as conn:
+                row = conn.execute("SELECT id FROM taxa WHERE name = ? LIMIT 1", (name,)).fetchone()
+                if row:
+                    return cast(str, row["id"])
+                tid = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO taxa (id, name, rank, parent_id, description, doc_id, page_ref) "
+                    "VALUES (?, ?, 'unknown', NULL, NULL, NULL, NULL)",
+                    (tid, name),
+                )
+                return tid
+
+        # Validate key exists
+        with get_connection(db_path) as conn:
+            key_row = conn.execute(
+                "SELECT id FROM identification_keys WHERE id = ?", (key_id,)
+            ).fetchone()
+            if not key_row:
+                raise ValueError(f"No key found with id={key_id}")
+
+            # Ensure couplet number is unique within this key
+            existing = conn.execute(
+                "SELECT id FROM couplets WHERE key_id = ? AND number = ?",
+                (key_id, number),
+            ).fetchone()
+            if existing:
+                raise ValueError(
+                    f"Couplet '{number}' already exists in key {key_id}. "
+                    "Use build_correct_leg if you need to update it."
+                )
+
+        if leg_a_goto and leg_a_terminal:
+            raise ValueError("Leg A: provide either goto or terminal, not both.")
+        if leg_b_goto and leg_b_terminal:
+            raise ValueError("Leg B: provide either goto or terminal, not both.")
+
+        if not leg_a_goto and not leg_a_terminal:
+            warnings.append(f"Couplet {number} leg A: no goto or terminal — stored as unresolved.")
+        if not leg_b_goto and not leg_b_terminal:
+            warnings.append(f"Couplet {number} leg B: no goto or terminal — stored as unresolved.")
+
+        couplet_id = str(uuid.uuid4())
+        leg_a_id = str(uuid.uuid4())
+        leg_b_id = str(uuid.uuid4())
+        page_0idx = page_ref - 1
+
+        # Resolve terminal taxon UUIDs (may create stub taxa)
+        leg_a_taxon_id = _resolve_terminal(leg_a_terminal) if leg_a_terminal else None
+        leg_b_taxon_id = _resolve_terminal(leg_b_terminal) if leg_b_terminal else None
+
+        with get_connection(db_path) as conn:
+            conn.execute(
+                "INSERT INTO couplets (id, key_id, number, page_ref) VALUES (?, ?, ?, ?)",
+                (couplet_id, key_id, number, page_0idx),
+            )
+            conn.execute(
+                "INSERT INTO couplet_legs "
+                "(id, couplet_id, leg_label, text, next_couplet_number, "
+                "next_couplet_id, terminal_taxon_id) "
+                "VALUES (?, ?, 'A', ?, ?, NULL, ?)",
+                (leg_a_id, couplet_id, leg_a_text, leg_a_goto, leg_a_taxon_id),
+            )
+            conn.execute(
+                "INSERT INTO couplet_legs "
+                "(id, couplet_id, leg_label, text, next_couplet_number, "
+                "next_couplet_id, terminal_taxon_id) "
+                "VALUES (?, ?, 'B', ?, ?, NULL, ?)",
+                (leg_b_id, couplet_id, leg_b_text, leg_b_goto, leg_b_taxon_id),
+            )
+
+        result: dict[str, Any] = {
+            "couplet_id": couplet_id,
+            "leg_a_id": leg_a_id,
+            "leg_b_id": leg_b_id,
+            "message": f"Couplet {number} committed.",
+        }
+        if warnings:
+            result["warnings"] = warnings
+        return result
+
+    # ------------------------------------------------------------------
+    # Key finalization
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Finalize a key after all couplets have been added. "
+            "Resolves all next_couplet_number references to next_couplet_id UUIDs, "
+            "and sets the key's start_couplet_id to the couplet numbered '1' "
+            "(or the lowest-numbered couplet if '1' is not present). "
+            "Returns counts of resolved and unresolved legs. "
+            "Unresolved legs (goto number not found) are reported as warnings — "
+            "they do not prevent finalization, but should be reviewed."
+        )
+    )
+    def build_finalize_key(key_id: str) -> dict[str, Any]:
+        """Resolve forward references and set start_couplet_id.
+
+        Args:
+            key_id: UUID of the identification key to finalize.
+        """
+        with get_connection(db_path) as conn:
+            key_row = conn.execute(
+                "SELECT id FROM identification_keys WHERE id = ?", (key_id,)
+            ).fetchone()
+            if not key_row:
+                raise ValueError(f"No key found with id={key_id}")
+
+            # Build number → UUID map for all couplets in this key
+            couplet_rows = conn.execute(
+                "SELECT id, number FROM couplets WHERE key_id = ?", (key_id,)
+            ).fetchall()
+            number_to_id: dict[str, str] = {row["number"]: row["id"] for row in couplet_rows}
+
+            # Fetch all legs that need resolution
+            legs = conn.execute(
+                "SELECT cl.id, cl.next_couplet_number "
+                "FROM couplet_legs cl "
+                "JOIN couplets c ON cl.couplet_id = c.id "
+                "WHERE c.key_id = ? AND cl.next_couplet_id IS NULL "
+                "AND cl.next_couplet_number IS NOT NULL",
+                (key_id,),
+            ).fetchall()
+
+            resolved = 0
+            unresolved: list[dict[str, str]] = []
+
+            for leg in legs:
+                target_id = number_to_id.get(leg["next_couplet_number"])
+                if target_id:
+                    conn.execute(
+                        "UPDATE couplet_legs SET next_couplet_id = ? WHERE id = ?",
+                        (target_id, leg["id"]),
+                    )
+                    resolved += 1
+                else:
+                    unresolved.append(
+                        {
+                            "leg_id": leg["id"],
+                            "missing_goto": leg["next_couplet_number"],
+                        }
+                    )
+
+            # Set start_couplet_id: prefer "1", else lowest numeric value
+            start_id = number_to_id.get("1")
+            if not start_id and number_to_id:
+
+                def _num_sort(item: tuple[str, str]) -> tuple[int, str]:
+                    import re
+
+                    m = re.match(r"(\d+)", item[0])
+                    return (int(m.group(1)) if m else 0, item[0])
+
+                first_num = sorted(number_to_id.items(), key=_num_sort)[0][1]
+                start_id = first_num
+
+            if start_id:
+                conn.execute(
+                    "UPDATE identification_keys SET start_couplet_id = ? WHERE id = ?",
+                    (start_id, key_id),
+                )
+
+        result: dict[str, Any] = {
+            "key_id": key_id,
+            "resolved_count": resolved,
+            "message": (
+                f"Key finalized. {resolved} forward references resolved. "
+                + (
+                    f"{len(unresolved)} unresolved gotos — see 'unresolved' list."
+                    if unresolved
+                    else "All references resolved."
+                )
+            ),
+        }
+        if unresolved:
+            result["unresolved"] = unresolved
+        return result
 
     # ------------------------------------------------------------------
     # Figure handling
@@ -647,33 +550,24 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
 
     @mcp.tool(
         description=(
-            "Add a morphological or anatomical term and its definition to the glossary. "
+            "Add a morphological or anatomical term and its definition to the global glossary. "
             "If the term already exists, the call is silently ignored (no overwrite). "
             "Use build_add_taxon for taxon-level prose descriptions."
         )
     )
-    def build_add_term(
-        term: str,
-        definition: str,
-        doc_id: str,
-        page_ref: int,
-    ) -> dict[str, str]:
+    def build_add_term(term: str, definition: str) -> dict[str, str]:
         """Add a glossary term.
 
         Args:
             term: The morphological/anatomical term.
             definition: Plain-text definition.
-            doc_id: Source document UUID.
-            page_ref: 1-indexed page number where this term is defined.
         """
         term_id = str(uuid.uuid4())
         with get_connection(db_path) as conn:
             conn.execute(
-                "INSERT OR IGNORE INTO glossary_terms (id, term, definition, doc_id, page_ref) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (term_id, term.lower().strip(), definition, doc_id, page_ref - 1),
+                "INSERT OR IGNORE INTO glossary_terms (id, term, definition) VALUES (?, ?, ?)",
+                (term_id, term.lower().strip(), definition),
             )
-            # Update FTS index
             conn.execute(
                 "INSERT INTO fts_content"
                 " (content_id, content_type, label, body) VALUES (?, ?, ?, ?)",
@@ -699,14 +593,13 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
         """Add or update a taxon with its description.
 
         Args:
-            taxon_name: Scientific name (e.g. "Ophioninae").
-            rank: Taxonomic rank (e.g. "subfamily", "genus", "species").
+            taxon_name: Scientific name (e.g. 'Ophioninae').
+            rank: Taxonomic rank (e.g. 'subfamily', 'genus', 'species').
             description: Full prose description from the source.
             doc_id: Source document UUID.
             page_ref: 1-indexed page number.
             parent_taxon_name: Name of the parent taxon (if known), for hierarchy.
         """
-        # Look up parent if provided
         parent_id = None
         if parent_taxon_name:
             with get_connection(db_path) as conn:
@@ -715,18 +608,17 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
                     (parent_taxon_name,),
                 ).fetchone()
                 if row:
-                    parent_id = row["id"]
+                    parent_id = cast(str, row["id"])
 
         taxon_id = str(uuid.uuid4())
         with get_connection(db_path) as conn:
-            # Upsert: if the taxon already exists, update description
             existing = conn.execute(
                 "SELECT id FROM taxa WHERE name = ? AND rank = ?",
                 (taxon_name, rank),
             ).fetchone()
 
             if existing:
-                taxon_id = existing["id"]
+                taxon_id = cast(str, existing["id"])
                 conn.execute(
                     "UPDATE taxa SET description = ?, doc_id = ?, page_ref = ? WHERE id = ?",
                     (description, doc_id, page_ref - 1, taxon_id),
@@ -737,7 +629,6 @@ def register_ingestion_tools(mcp: FastMCP, db_path: str | Path) -> None:
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (taxon_id, taxon_name, rank, parent_id, description, doc_id, page_ref - 1),
                 )
-            # Update FTS
             conn.execute(
                 "INSERT INTO fts_content"
                 " (content_id, content_type, label, body) VALUES (?, ?, ?, ?)",

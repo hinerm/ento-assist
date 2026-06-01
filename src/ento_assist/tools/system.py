@@ -61,6 +61,31 @@ def register_system_tools(mcp) -> None:  # type: ignore[type-arg]
                 "Install it via your system package manager (e.g. `brew install python-tk`)."
             ) from exc
 
+        import sys
+
+        if sys.platform == "darwin":
+            # Use osascript on macOS to avoid the lingering Tk Dock entry / TclError window.
+            import subprocess
+
+            ext_list = extensions or []
+            if ext_list:
+                # Build AppleScript type list, e.g. {"PDF", "pdf"}
+                types = ", ".join(f'"{e.lstrip(".").upper()}"' for e in ext_list)
+                of_type_clause = f" of type {{{types}}}"
+            else:
+                of_type_clause = ""
+
+            script = f'POSIX path of (choose file with prompt "{title}"{of_type_clause})'
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+            )
+            path = result.stdout.strip()
+            if not path:
+                raise ValueError("No file was selected.")
+            return path
+
         try:
             root = tk.Tk()
         except tk.TclError as exc:  # pragma: no cover

@@ -72,7 +72,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
                     """
                     SELECT k.id, k.title, t.name AS scope_taxon, d.title AS doc_title
                     FROM identification_keys k
-                    LEFT JOIN taxa t ON k.scope_taxon_id = t.id
+                    LEFT JOIN taxa t ON k.base_taxon_id = t.id
                     LEFT JOIN documents d ON k.doc_id = d.id
                     WHERE t.name LIKE ?
                     ORDER BY k.title
@@ -84,7 +84,7 @@ def register_identification_tools(mcp: FastMCP) -> None:
                     """
                     SELECT k.id, k.title, t.name AS scope_taxon, d.title AS doc_title
                     FROM identification_keys k
-                    LEFT JOIN taxa t ON k.scope_taxon_id = t.id
+                    LEFT JOIN taxa t ON k.base_taxon_id = t.id
                     LEFT JOIN documents d ON k.doc_id = d.id
                     ORDER BY k.title
                     """,
